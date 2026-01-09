@@ -1,5 +1,6 @@
 import asyncio
 from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
@@ -97,24 +98,20 @@ def run_ping_server():
     server.serve_forever()
 
 
+# Запуск ping-сервера в отдельном потоке
 threading.Thread(target=run_ping_server, daemon=True).start()
 
 
 # -----------------------------
 # Основной entrypoint
 # -----------------------------
-async def main():
-    # Сбрасываем старые updates
+if __name__ == "__main__":
+    # Сбрасываем старые updates перед запуском polling
     try:
-        await bot.get_updates(offset=-1)
+        asyncio.run(bot.get_updates(offset=-1))
         print("Старые updates сброшены")
     except Exception as e:
         print(f"Не удалось сбросить старые updates: {e}")
 
-    # Запуск polling
-    await dp.start_polling(skip_updates=True)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
-
+    # Запуск polling aiogram 2.25.x
+    executor.start_polling(dp, skip_updates=True)

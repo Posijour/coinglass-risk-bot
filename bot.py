@@ -107,5 +107,17 @@ def run_ping_server():
 threading.Thread(target=run_ping_server, daemon=True).start()
 
 
+# -----------------------------
+# Сброс старых updates перед polling
+# -----------------------------
+async def reset_updates():
+    try:
+        await bot.get_updates(offset=-1)
+        print("Старые updates сброшены")
+    except Exception as e:
+        print(f"Не удалось сбросить старые updates: {e}")
+
+
 if __name__ == "__main__":
+    asyncio.run(reset_updates())
     executor.start_polling(dp, skip_updates=True)

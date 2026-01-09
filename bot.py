@@ -19,6 +19,7 @@ async def risk_loop(chat_id: int):
     while chat_id in active_chats:
         for symbol in SYMBOLS:
             try:
+                # Синхронные функции безопасно для aiogram 2.x
                 funding = get_funding_rate(symbol)
                 long_ratio = get_long_short_ratio(symbol)
                 oi = get_open_interest(symbol)
@@ -66,8 +67,7 @@ async def start_handler(message: types.Message):
 # Авто-отправка первой проверки при старте бота
 # -----------------------------
 async def send_initial_risk():
-    # Подождём 5 секунд, чтобы бот полностью стартанул
-    await asyncio.sleep(5)
+    await asyncio.sleep(5)  # ждем, чтобы бот стартанул
     for chat_id in active_chats:
         asyncio.create_task(risk_loop(chat_id))
 
@@ -95,6 +95,5 @@ threading.Thread(target=run_ping_server, daemon=True).start()
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
-    # Стартуем авто-проверку
     loop.create_task(send_initial_risk())
     executor.start_polling(dp, skip_updates=True)

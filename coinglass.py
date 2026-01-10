@@ -1,4 +1,3 @@
-import time
 import requests
 from config import COINGLASS_API_KEY
 
@@ -110,3 +109,4 @@ def get_liquidations(symbol: str) -> float:
 
     last = data[-1]
     return float(last["longLiquidation"]) + float(last["shortLiquidation"])
+

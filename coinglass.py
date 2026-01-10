@@ -45,18 +45,31 @@ def _get(endpoint: str, params: dict, retries=3, delay=2):
 
 
 def get_funding_rate(symbol: str) -> float:
-    data = _get("funding_rate", {"symbol": symbol})
-    if not data:
-        return 0
-    return sum(x.get("fundingRate", 0) for x in data) / len(data)
+    base = symbol.replace("USDT", "")
+
+    data = _get(
+        "funding_rate",
+        {
+            "symbol": base,
+            "exchange": "Binance"
+        }
+    )
+    return sum(float(x["fundingRate"]) for x in data) / len(data)
 
 
 def get_long_short_ratio(symbol: str) -> float:
-    data = _get("global_long_short_account_ratio", {"symbol": symbol})
-    if not data:
-        return 0
+    base = symbol.replace("USDT", "")
+
+    data = _get(
+        "global_long_short_account_ratio",
+        {
+            "symbol": base,
+            "exchange": "Binance"
+        }
+    )
+
     latest = data[-1]
-    return float(latest.get("longRatio", 0))
+    return float(latest["longRatio"])
 
 
 def get_open_interest(symbol: str) -> float:
@@ -72,3 +85,4 @@ def get_liquidations(symbol: str) -> float:
         return 0
     latest = data[-1]
     return float(latest.get("longLiquidation", 0)) + float(latest.get("shortLiquidation", 0))
+

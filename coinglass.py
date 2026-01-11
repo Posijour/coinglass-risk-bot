@@ -2,117 +2,91 @@ import requests
 from config import COINGLASS_API_KEY
 
 BASE_URL = "https://open-api-v4.coinglass.com/api"
-EXCHANGE = "Binance"
 
 HEADERS = {
     "accept": "application/json",
-    "coinglassSecret": COINGLASS_API_KEY
+    "CG-API-KEY": COINGLASS_API_KEY
 }
 
-
-class CoinGlassError(Exception):
-    pass
-
-
-def _get(endpoint: str, params: dict):
+def _get(endpoint: str, params: dict = None, max_retries: int = 3):
     url = f"{BASE_URL}{endpoint}"
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.get(url, headers=HEADERS, params=params, timeout=10)
+            r.raise_for_status()
+            data = r.json()
+            if "data" not in data:
+                raise ValueError(f"{endpoint} api returned no data")
+            return data["data"]
+        except Exception as e:
+            if attempt == max_retries:
+                raise
+            else:
+                continue
 
-    r = requests.get(
-        url,
-        headers=HEADERS,
-        params=params,
-        timeout=15
-    )
-
-    if r.status_code != 200:
-        raise CoinGlassError(
-            f"{endpoint} error {r.status_code}: {r.text}"
-        )
-
-    data = r.json()
-
-    # v4 иногда возвращает code != 0 с HTTP 200
-    if isinstance(data, dict) and data.get("code") not in (0, "0", None):
-        raise CoinGlassError(
-            f"{endpoint} api error: {data}"
-        )
-
-    return data.get("data")
-
-
-# -------------------------------------------------
-# FUNDING RATE (current)
-# -------------------------------------------------
-def get_funding_rate(symbol: str) -> float:
-    data = _get(
-        "/futures/funding-rate",
-        {
-            "symbol": symbol,
-            "exchange": EXCHANGE
-        }
-    )
-
+def get_funding_rate(symbol: str, exchange: str = "Binance", interval: str = "5m"):
+    """
+    Получаем последний funding rate для символа.
+    Для Hobbyist тарифа доступно через OHLC-history, берём последний элемент.
+    """
+    endpoint = "/futures/funding-rate/history"
+    params = {
+        "symbol": symbol,
+        "exchange": exchange,
+        "interval": interval,
+        "limit": 1
+    }
+    data = _get(endpoint, params)
     if not data:
-        raise CoinGlassError("funding_rate: empty data")
+        raise ValueError("No funding rate data returned")
+    return float(data[-1]["fundingRate"])
 
-    # v4 возвращает список
-    return float(data[0]["fundingRate"])
-
-
-# -------------------------------------------------
-# GLOBAL LONG / SHORT RATIO
-# -------------------------------------------------
-def get_long_short_ratio(symbol: str) -> float:
-    data = _get(
-        "/futures/global-long-short-account-ratio",
-        {
-            "symbol": symbol,
-            "exchange": EXCHANGE
-        }
-    )
-
+def get_long_short_ratio(symbol: str, exchange: str = "Binance", interval: str = "5m"):
+    """
+    Получаем глобальное соотношение лонгов/шортов.
+    """
+    endpoint = "/futures/global-long-short-account-ratio/history"
+    params = {
+        "symbol": symbol,
+        "exchange": exchange,
+        "interval": interval,
+        "limit": 1
+    }
+    data = _get(endpoint, params)
     if not data:
-        raise CoinGlassError("long_short_ratio: empty data")
+        raise ValueError("No long/short ratio data returned")
+    return float(data[-1]["longRatio"])
 
-    return float(data[0]["longRatio"])
-
-
-# -------------------------------------------------
-# OPEN INTEREST (current)
-# -------------------------------------------------
-def get_open_interest(symbol: str) -> float:
-    data = _get(
-        "/futures/open-interest",
-        {
-            "symbol": symbol,
-            "exchange": EXCHANGE
-        }
-    )
-
+def get_open_interest(symbol: str, exchange: str = "Binance", interval: str = "5m"):
+    """
+    Получаем open interest.
+    """
+    endpoint = "/futures/open-interest/history"
+    params = {
+        "symbol": symbol,
+        "exchange": exchange,
+        "interval": interval,
+        "limit": 1
+    }
+    data = _get(endpoint, params)
     if not data:
-        raise CoinGlassError("open_interest: empty data")
+        raise ValueError("No open interest data returned")
+    return float(data[-1]["openInterest"])
 
-    return float(data[0]["openInterest"])
-
-
-# -------------------------------------------------
-# LIQUIDATIONS (aggregated)
-# -------------------------------------------------
-def get_liquidations(symbol: str) -> float:
-    data = _get(
-        "/futures/liquidation",
-        {
-            "symbol": symbol,
-            "exchange_list": EXCHANGE
-        }
-    )
-
+def get_liquidations(symbol: str, exchange: str = "Binance", interval: str = "5m"):
+    """
+    Получаем ликвидации (long + short).
+    """
+    endpoint = "/futures/liquidation/aggregated-history"
+    params = {
+        "symbol": symbol,
+        "exchange": exchange,
+        "interval": interval,
+        "limit": 1
+    }
+    data = _get(endpoint, params)
     if not data:
-        raise CoinGlassError("liquidations: empty data")
+        raise ValueError("No liquidation data returned")
+    latest = data[-1]
+    return float(latest.get("longLiquidation", 0)) + float(latest.get("shortLiquidation", 0))
 
-    latest = data[0]
-
-    long_liq = float(latest.get("longLiquidation", 0))
-    short_liq = float(latest.get("shortLiquidation", 0))
-
-    return long_liq + short_liq

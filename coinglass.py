@@ -1,17 +1,16 @@
 import time
 import requests
-
 from config import COINGLASS_API_KEY
 
-
 BASE_URL = "https://open-api-v4.coinglass.com/api"
+
 HEADERS = {
     "accept": "application/json",
     "CG-API-KEY": COINGLASS_API_KEY,
 }
 
-TIME_WINDOW_MINUTES = 5
-DEFAULT_EXCHANGE_LIST = "BINANCE"
+EXCHANGE = "BINANCE"
+TIME_WINDOW_MINUTES = 60
 
 
 class CoinGlassError(Exception):
@@ -19,29 +18,29 @@ class CoinGlassError(Exception):
 
 
 def _time_range():
-    end_time = int(time.time() * 1000)
-    start_time = end_time - TIME_WINDOW_MINUTES * 60 * 1000
-    return start_time, end_time
+    end = int(time.time() * 1000)
+    start = end - TIME_WINDOW_MINUTES * 60 * 1000
+    return start, end
 
 
 def _request(path: str, params: dict):
-    url = f"{BASE_URL}{path}"
-    r = requests.get(url, headers=HEADERS, params=params, timeout=15)
+    r = requests.get(
+        f"{BASE_URL}{path}",
+        headers=HEADERS,
+        params=params,
+        timeout=15,
+    )
 
     if r.status_code != 200:
         raise CoinGlassError(f"{path} error {r.status_code}: {r.text}")
 
-    data = r.json()
-
-    if not data or "data" not in data or not data["data"]:
+    data = r.json().get("data")
+    if not data:
         raise CoinGlassError(f"{path} api returned no data")
 
-    return data["data"]
+    return data
 
 
-# -------------------------------------------------
-# FUNDING RATE
-# -------------------------------------------------
 def get_funding_rate(symbol: str) -> float:
     start, end = _time_range()
 
@@ -49,18 +48,15 @@ def get_funding_rate(symbol: str) -> float:
         "/futures/funding-rate/history",
         {
             "symbol": symbol,
+            "exchange": EXCHANGE,
             "startTime": start,
             "endTime": end,
         },
     )
 
-    # Берём последнее значение
     return float(data[-1]["fundingRate"])
 
 
-# -------------------------------------------------
-# LONG / SHORT RATIO
-# -------------------------------------------------
 def get_long_short_ratio(symbol: str) -> float:
     start, end = _time_range()
 
@@ -73,9 +69,9 @@ def get_long_short_ratio(symbol: str) -> float:
         },
     )
 
-    item = data[-1]
-    long = float(item["longAccount"])
-    short = float(item["shortAccount"])
+    last = data[-1]
+    long = float(last["longAccount"])
+    short = float(last["shortAccount"])
 
     if short == 0:
         raise CoinGlassError("shortAccount is zero")
@@ -83,9 +79,6 @@ def get_long_short_ratio(symbol: str) -> float:
     return long / short
 
 
-# -------------------------------------------------
-# OPEN INTEREST
-# -------------------------------------------------
 def get_open_interest(symbol: str) -> float:
     start, end = _time_range()
 
@@ -93,6 +86,7 @@ def get_open_interest(symbol: str) -> float:
         "/futures/open-interest/history",
         {
             "symbol": symbol,
+            "exchange": EXCHANGE,
             "startTime": start,
             "endTime": end,
         },
@@ -101,9 +95,6 @@ def get_open_interest(symbol: str) -> float:
     return float(data[-1]["openInterest"])
 
 
-# -------------------------------------------------
-# LIQUIDATIONS
-# -------------------------------------------------
 def get_liquidations(symbol: str) -> float:
     start, end = _time_range()
 
@@ -111,15 +102,13 @@ def get_liquidations(symbol: str) -> float:
         "/futures/liquidation/aggregated-history",
         {
             "symbol": symbol,
-            "exchange_list": DEFAULT_EXCHANGE_LIST,
+            "exchange_list": EXCHANGE,
             "startTime": start,
             "endTime": end,
         },
     )
 
     last = data[-1]
-    long_liq = float(last.get("longLiquidation", 0))
-    short_liq = float(last.get("shortLiquidation", 0))
-
-    return long_liq + short_liq
-
+    return float(last.get("longLiquidation", 0)) + float(
+        last.get("shortLiquidation", 0)
+    )

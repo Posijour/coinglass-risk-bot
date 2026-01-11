@@ -2,12 +2,12 @@ import requests
 from config import COINGLASS_API_KEY
 
 BASE_URL = "https://open-api-v4.coinglass.com/api"
-HEADERS = {
-    "CG-API-KEY": COINGLASS_API_KEY,
-    "accept": "application/json"
-}
+EXCHANGE = "Binance"
 
-TIMEOUT = 10
+HEADERS = {
+    "accept": "application/json",
+    "coinglassSecret": COINGLASS_API_KEY
+}
 
 
 class CoinGlassError(Exception):
@@ -15,8 +15,14 @@ class CoinGlassError(Exception):
 
 
 def _get(path: str, params: dict):
-    url = BASE_URL + path
-    r = requests.get(url, headers=HEADERS, params=params, timeout=TIMEOUT)
+    url = f"{BASE_URL}{path}"
+
+    r = requests.get(
+        url,
+        headers=HEADERS,
+        params=params,
+        timeout=15
+    )
 
     if r.status_code != 200:
         raise CoinGlassError(
@@ -24,104 +30,88 @@ def _get(path: str, params: dict):
         )
 
     data = r.json()
-    if data.get("code") != "0":
-        raise CoinGlassError(f"{path} api error: {data}")
 
-    return data["data"]
+    # CoinGlass любит возвращать code != 0 без HTTP ошибки
+    if isinstance(data, dict) and data.get("code") not in (None, "0", 0):
+        raise CoinGlassError(
+            f"{path} api error: {data}"
+        )
+
+    return data.get("data")
 
 
-# -----------------------------
+# -------------------------
 # FUNDING RATE
-# -----------------------------
+# -------------------------
 def get_funding_rate(symbol: str) -> float:
-    """
-    Возвращает последний funding rate (средний)
-    """
     data = _get(
-        "/futures/fundingRate/history",
+        "/api/pro/v1/futures/funding-rate",
         {
             "symbol": symbol,
-            "interval": "4h",
-            "limit": 1
+            "exchange": EXCHANGE
         }
     )
 
     if not data:
-        raise CoinGlassError("funding_rate empty response")
+        raise CoinGlassError("funding_rate: empty data")
 
-    return float(data[-1]["fundingRate"])
+    return float(data[0]["fundingRate"])
 
 
-# -----------------------------
+# -------------------------
 # LONG / SHORT RATIO
-# -----------------------------
+# -------------------------
 def get_long_short_ratio(symbol: str) -> float:
-    """
-    Возвращает глобальный long ratio (0..1)
-    """
     data = _get(
-        "/futures/global-long-short-account-ratio/history",
+        "/api/pro/v1/futures/global-long-short-account-ratio",
         {
             "symbol": symbol,
-            "interval": "4h",
-            "limit": 1
+            "exchange": EXCHANGE
         }
     )
 
     if not data:
-        raise CoinGlassError("long_short_ratio empty response")
+        raise CoinGlassError("long_short_ratio: empty data")
 
-    long_account = float(data[-1]["longAccount"])
-    short_account = float(data[-1]["shortAccount"])
-
-    if long_account + short_account == 0:
-        return 0.0
-
-    return long_account / (long_account + short_account)
+    return float(data[0]["longRatio"])
 
 
-# -----------------------------
+# -------------------------
 # OPEN INTEREST
-# -----------------------------
+# -------------------------
 def get_open_interest(symbol: str) -> float:
-    """
-    Возвращает последний open interest
-    """
     data = _get(
-        "/futures/openInterest/ohlc-history",
+        "/api/pro/v1/futures/open-interest",
         {
             "symbol": symbol,
-            "interval": "4h",
-            "limit": 1
+            "exchange": EXCHANGE
         }
     )
 
     if not data:
-        raise CoinGlassError("open_interest empty response")
+        raise CoinGlassError("open_interest: empty data")
 
-    return float(data[-1]["close"])
+    return float(data[0]["openInterest"])
 
 
-# -----------------------------
+# -------------------------
 # LIQUIDATIONS
-# -----------------------------
+# -------------------------
 def get_liquidations(symbol: str) -> float:
-    """
-    Возвращает сумму ликвидаций за последний интервал
-    """
     data = _get(
-        "/futures/liquidation/aggregated-history",
+        "/api/pro/v1/futures/liquidation",
         {
             "symbol": symbol,
-            "interval": "4h",
-            "limit": 1
+            "exchange_list": EXCHANGE
         }
     )
 
     if not data:
-        raise CoinGlassError("liquidations empty response")
+        raise CoinGlassError("liquidations: empty data")
 
-    last = data[-1]
-    return float(last.get("longLiquidation", 0)) + float(
-        last.get("shortLiquidation", 0)
-    )
+    latest = data[0]
+
+    long_liq = float(latest.get("longLiquidation", 0))
+    short_liq = float(latest.get("shortLiquidation", 0))
+
+    return long_liq + short_liq

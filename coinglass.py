@@ -14,8 +14,8 @@ class CoinGlassError(Exception):
     pass
 
 
-def _get(path: str, params: dict):
-    url = f"{BASE_URL}{path}"
+def _get(endpoint: str, params: dict):
+    url = f"{BASE_URL}{endpoint}"
 
     r = requests.get(
         url,
@@ -26,26 +26,26 @@ def _get(path: str, params: dict):
 
     if r.status_code != 200:
         raise CoinGlassError(
-            f"{path} error {r.status_code}: {r.text}"
+            f"{endpoint} error {r.status_code}: {r.text}"
         )
 
     data = r.json()
 
-    # CoinGlass любит возвращать code != 0 без HTTP ошибки
-    if isinstance(data, dict) and data.get("code") not in (None, "0", 0):
+    # v4 иногда возвращает code != 0 с HTTP 200
+    if isinstance(data, dict) and data.get("code") not in (0, "0", None):
         raise CoinGlassError(
-            f"{path} api error: {data}"
+            f"{endpoint} api error: {data}"
         )
 
     return data.get("data")
 
 
-# -------------------------
-# FUNDING RATE
-# -------------------------
+# -------------------------------------------------
+# FUNDING RATE (current)
+# -------------------------------------------------
 def get_funding_rate(symbol: str) -> float:
     data = _get(
-        "/api/pro/v1/futures/funding-rate",
+        "/futures/funding-rate",
         {
             "symbol": symbol,
             "exchange": EXCHANGE
@@ -55,15 +55,16 @@ def get_funding_rate(symbol: str) -> float:
     if not data:
         raise CoinGlassError("funding_rate: empty data")
 
+    # v4 возвращает список
     return float(data[0]["fundingRate"])
 
 
-# -------------------------
-# LONG / SHORT RATIO
-# -------------------------
+# -------------------------------------------------
+# GLOBAL LONG / SHORT RATIO
+# -------------------------------------------------
 def get_long_short_ratio(symbol: str) -> float:
     data = _get(
-        "/api/pro/v1/futures/global-long-short-account-ratio",
+        "/futures/global-long-short-account-ratio",
         {
             "symbol": symbol,
             "exchange": EXCHANGE
@@ -76,12 +77,12 @@ def get_long_short_ratio(symbol: str) -> float:
     return float(data[0]["longRatio"])
 
 
-# -------------------------
-# OPEN INTEREST
-# -------------------------
+# -------------------------------------------------
+# OPEN INTEREST (current)
+# -------------------------------------------------
 def get_open_interest(symbol: str) -> float:
     data = _get(
-        "/api/pro/v1/futures/open-interest",
+        "/futures/open-interest",
         {
             "symbol": symbol,
             "exchange": EXCHANGE
@@ -94,12 +95,12 @@ def get_open_interest(symbol: str) -> float:
     return float(data[0]["openInterest"])
 
 
-# -------------------------
-# LIQUIDATIONS
-# -------------------------
+# -------------------------------------------------
+# LIQUIDATIONS (aggregated)
+# -------------------------------------------------
 def get_liquidations(symbol: str) -> float:
     data = _get(
-        "/api/pro/v1/futures/liquidation",
+        "/futures/liquidation",
         {
             "symbol": symbol,
             "exchange_list": EXCHANGE

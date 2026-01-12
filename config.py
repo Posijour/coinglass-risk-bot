@@ -1,9 +1,9 @@
-import os
+BOT_TOKEN = "ТВОЙ_ТОКЕН"
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-COINGLASS_API_KEY = os.getenv("COINGLASS_API_KEY")
+SYMBOLS = [
+    "BTCUSDT",
+    "ETHUSDT",
+]
 
-SYMBOLS = ["BTCUSDT_PERP", "ETHUSDT_PERP"]
-INTERVAL_SECONDS = 300  # 5 минут
+INTERVAL_SECONDS = 300
 RISK_ALERT_LEVEL = 6
-

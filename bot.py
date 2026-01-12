@@ -5,66 +5,63 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
 from config import BOT_TOKEN, SYMBOLS, INTERVAL_SECONDS, RISK_ALERT_LEVEL
-from coinglass import get_funding_rate, get_long_short_ratio, get_open_interest, get_liquidations
+from binance import (
+    get_funding_rate,
+    get_long_short_ratio,
+    get_open_interest,
+    get_liquidations,
+    BinanceError
+)
 from risk import calculate_risk
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
-last_oi = {}       # { "BTCUSDT": value, "ETHUSDT": value }
+last_oi = {}
 active_chats = set()
 
 
 async def risk_loop(chat_id: int):
     while chat_id in active_chats:
         for symbol in SYMBOLS:
-            funding = 0
-            long_ratio = 0
-            oi = 0
-            liquidations = 0
+            errors = {}
+            funding = long_ratio = oi = liquidations = 0
 
-            try:
+            for name, func in {
+                "funding_rate": get_funding_rate,
+                "long_short_ratio": get_long_short_ratio,
+                "open_interest": get_open_interest,
+                "liquidations": get_liquidations,
+            }.items():
                 try:
-                    funding = get_funding_rate(symbol)
+                    locals()[name] = func(symbol)
                 except Exception as e:
-                    await bot.send_message(chat_id, f"{symbol}: funding_rate недоступен ({e})")
+                    errors[name] = str(e)
 
-                try:
-                    long_ratio = get_long_short_ratio(symbol)
-                except Exception as e:
-                    await bot.send_message(chat_id, f"{symbol}: long_short_ratio недоступен ({e})")
+            if errors:
+                msg = f"{symbol}: данные частично недоступны\n"
+                msg += "\n".join(f"- {k}: {v}" for k, v in errors.items())
+                await bot.send_message(chat_id, msg)
+                continue
 
-                try:
-                    oi = get_open_interest(symbol)
-                except Exception as e:
-                    await bot.send_message(chat_id, f"{symbol}: open_interest недоступен ({e})")
+            prev_oi = last_oi.get(symbol, oi)
+            oi_change = oi - prev_oi
+            last_oi[symbol] = oi
 
-                try:
-                    liquidations = get_liquidations(symbol)
-                except Exception as e:
-                    await bot.send_message(chat_id, f"{symbol}: liquidations недоступны ({e})")
+            score, direction, reasons = calculate_risk(
+                funding=funding,
+                long_ratio=long_ratio,
+                oi_change=oi_change,
+                liquidations=liquidations
+            )
 
-                prev_oi = last_oi.get(symbol, oi)
-                oi_change = oi - prev_oi
-                last_oi[symbol] = oi
-
-                score, direction, reasons = calculate_risk(
-                    funding=funding,
-                    long_ratio=long_ratio,
-                    oi_change=oi_change,
-                    liquidations=liquidations
+            if score >= RISK_ALERT_LEVEL and direction:
+                text = (
+                    f"⚠️ {symbol} RISK ALERT ({direction})\n\n"
+                    f"Risk score: {score}\n\n"
+                    + "\n".join(f"- {r}" for r in reasons)
                 )
-
-                if score >= RISK_ALERT_LEVEL and direction:
-                    text = (
-                        f"⚠️ {symbol} RISK ALERT ({direction})\n\n"
-                        f"Risk score: {score}\n\n"
-                        + "\n".join(f"- {r}" for r in reasons)
-                    )
-                    await bot.send_message(chat_id, text)
-
-            except Exception as e:
-                await bot.send_message(chat_id, f"Ошибка при обработке {symbol}: {e}")
+                await bot.send_message(chat_id, text)
 
         await asyncio.sleep(INTERVAL_SECONDS)
 
@@ -72,53 +69,32 @@ async def risk_loop(chat_id: int):
 @dp.message_handler(commands=["start"])
 async def start_handler(message: types.Message):
     await message.reply(
-        "Я слежу за рынком и предупреждаю,\n"
-        "когда риск для лонгов или шортов становится высоким.\n\n"
-        "Если я молчу — рынок обычный."
+        "Я слежу за Binance Futures.\n"
+        "Пишу только когда реально опасно.\n\n"
+        "Тишина = рынок обычный."
     )
     if message.chat.id not in active_chats:
         active_chats.add(message.chat.id)
         asyncio.create_task(risk_loop(message.chat.id))
 
 
-# -----------------------------
-# Ping server для UptimeRobot
-# -----------------------------
 class PingHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b'Bot is alive!')
+        self.wfile.write(b"OK")
 
     def do_HEAD(self):
         self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
         self.end_headers()
 
 
-def run_ping_server():
-    server = HTTPServer(('0.0.0.0', 8080), PingHandler)
-    print("Ping server running on port 8080")
-    server.serve_forever()
+def run_ping():
+    HTTPServer(("0.0.0.0", 8080), PingHandler).serve_forever()
 
 
-threading.Thread(target=run_ping_server, daemon=True).start()
+threading.Thread(target=run_ping, daemon=True).start()
 
 
-# -----------------------------
-# MAIN
-# -----------------------------
 if __name__ == "__main__":
-    # Сбрасываем старые updates
-    try:
-        asyncio.run(bot.get_updates(offset=-1))
-        print("Старые updates сброшены")
-    except Exception as e:
-        print(f"Не удалось сбросить старые updates: {e}")
-
-    # Создаём event loop вручную для aiogram 2.x на Python 3.11
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
     executor.start_polling(dp, skip_updates=True)

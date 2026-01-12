@@ -13,13 +13,14 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 active_chats = set()
-
 last_oi = {}
 last_funding = {}
 cache = {}
 
 
 async def risk_loop(chat_id: int):
+    await asyncio.sleep(5)  # не сразу после /start
+
     while chat_id in active_chats:
         for symbol in SYMBOLS:
             try:
@@ -61,8 +62,10 @@ async def risk_loop(chat_id: int):
                 )
                 await bot.send_message(chat_id, text)
 
+            except BinanceError:
+                pass  # молча, чтобы не спамить
             except Exception as e:
-                await bot.send_message(chat_id, f"{symbol}: ошибка {e}")
+                print("ERROR:", e)
 
         await asyncio.sleep(INTERVAL_SECONDS)
 
@@ -72,23 +75,30 @@ async def start(message: types.Message):
     kb = InlineKeyboardMarkup().add(
         InlineKeyboardButton("📊 Текущий риск", callback_data="risk")
     )
+
     await message.reply(
         "Я слежу за Binance Futures.\n"
         "Пишу только когда реально опасно.\n\n"
         "Тишина = рынок обычный.",
         reply_markup=kb
     )
-    active_chats.add(message.chat.id)
-    asyncio.create_task(risk_loop(message.chat.id))
+
+    if message.chat.id not in active_chats:
+        active_chats.add(message.chat.id)
+        asyncio.create_task(risk_loop(message.chat.id))
 
 
 @dp.callback_query_handler(lambda c: c.data == "risk")
 async def current_risk(call: types.CallbackQuery):
+    if not cache:
+        await call.message.answer("Пока нет данных")
+        return
+
     lines = []
-    for symbol, data in cache.items():
-        score, direction, reasons = data
-        lines.append(f"{symbol}: {score} ({direction})")
-    await call.message.answer("\n".join(lines) or "Нет данных")
+    for symbol, (score, direction, _) in cache.items():
+        lines.append(f"{symbol}: {score} {direction or ''}")
+
+    await call.message.answer("\n".join(lines))
 
 
 class PingHandler(BaseHTTPRequestHandler):
@@ -106,5 +116,3 @@ threading.Thread(
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
-
-

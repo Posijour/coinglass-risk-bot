@@ -16,10 +16,13 @@ active_chats = set()
 last_oi = {}
 last_funding = {}
 cache = {}
+cache_ready = False  # ⬅️ флаг готовности данных
 
 
 async def risk_loop(chat_id: int):
     await asyncio.sleep(5)  # небольшая пауза после /start
+
+    global cache_ready
 
     while chat_id in active_chats:
         for symbol in SYMBOLS:
@@ -47,6 +50,7 @@ async def risk_loop(chat_id: int):
 
                 # обновляем cache каждый цикл
                 cache[symbol] = (score, direction, reasons)
+                cache_ready = True  # ⬅️ как только пошёл цикл — данные точно есть
 
                 if funding_spike:
                     await bot.send_message(chat_id, f"📈 {symbol} FUNDING SPIKE")
@@ -69,7 +73,7 @@ async def risk_loop(chat_id: int):
                 await bot.send_message(chat_id, text)
 
             except BinanceError:
-                pass  # не спамим ошибками бинанса
+                pass  # бинанс иногда истерит, мы — нет
             except Exception as e:
                 print("ERROR:", e)
 
@@ -92,7 +96,10 @@ async def start(message: types.Message):
     if message.chat.id not in active_chats:
         active_chats.add(message.chat.id)
 
-        # 🔹 первичное заполнение cache, чтобы кнопка работала сразу
+        # 🔹 первичное заполнение cache
+        global cache_ready
+        cache_ready = False
+
         for symbol in SYMBOLS:
             try:
                 funding = get_funding_rate(symbol)
@@ -110,6 +117,7 @@ async def start(message: types.Message):
                 )
 
                 cache[symbol] = (score, direction, reasons)
+                cache_ready = True
             except Exception:
                 pass
 
@@ -118,8 +126,12 @@ async def start(message: types.Message):
 
 @dp.callback_query_handler(lambda c: c.data == "risk")
 async def current_risk(call: types.CallbackQuery):
+    if not cache_ready:
+        await call.message.answer("⏳ Данные загружаются, попробуй через пару секунд")
+        return
+
     if not cache:
-        await call.message.answer("Пока нет данных, рынок ещё не проверялся")
+        await call.message.answer("Нет данных")
         return
 
     lines = []
@@ -149,4 +161,3 @@ threading.Thread(
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
-

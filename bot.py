@@ -32,6 +32,8 @@ async def risk_loop(chat_id: int):
 
     await asyncio.sleep(3)
 
+    print(f"[LOOP] cycle done, cache size = {len(cache)}")
+
     while chat_id in active_chats:
         cycle_had_data = False
 
@@ -153,4 +155,5 @@ threading.Thread(
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
+
 

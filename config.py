@@ -2,7 +2,7 @@ import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-SYMBOLS = ["BTCUSDT"]
+SYMBOLS = ["BTCUSDT, ETHUSDT, XRPUSDT, BNBUSDT"]
 
 INTERVAL_SECONDS = 300  # НЕ МЕНЬШЕ 60
 
@@ -11,4 +11,5 @@ HARD_ALERT_LEVEL = 6
 
 FUNDING_SPIKE_DELTA = 0.003   # 0.3%
 OI_SPIKE_DELTA = 0.03         # 3%
+
 

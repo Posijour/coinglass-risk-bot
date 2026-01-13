@@ -9,6 +9,8 @@ import threading
 from config import *
 from binance import *
 from risk import calculate_risk
+async def call(fn, *args):
+    return await asyncio.to_thread(fn, *args)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
@@ -32,10 +34,10 @@ async def risk_loop(chat_id: int):
 
         for symbol in SYMBOLS:
             try:
-                funding = get_funding_rate(symbol)
-                long_ratio = get_long_short_ratio(symbol)
-                oi = get_open_interest(symbol)
-                liquidations = get_liquidations(symbol)
+                funding = await call(get_funding_rate, symbol)
+                long_ratio = await call(get_long_short_ratio, symbol)
+                oi = await call(get_open_interest, symbol)
+                liquidations = await call(get_liquidations, symbol)
 
                 prev_oi = last_oi.get(symbol, oi)
                 oi_change = oi - prev_oi
@@ -144,3 +146,4 @@ threading.Thread(
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
+

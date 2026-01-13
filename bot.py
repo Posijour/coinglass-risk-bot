@@ -10,8 +10,10 @@ from config import *
 from binance import *
 from risk import calculate_risk
 
+
 async def call(fn, *args):
     return await asyncio.to_thread(fn, *args)
+
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
@@ -31,8 +33,12 @@ async def risk_loop(chat_id: int):
     await asyncio.sleep(3)
 
     while chat_id in active_chats:
+        had_any_attempt = False
+
         for symbol in SYMBOLS:
             try:
+                had_any_attempt = True
+
                 funding = await call(get_funding_rate, symbol)
                 long_ratio = await call(get_long_short_ratio, symbol)
                 oi = await call(get_open_interest, symbol)
@@ -54,9 +60,7 @@ async def risk_loop(chat_id: int):
                     liquidations
                 )
 
-                # 🔴 ВСЕГДА обновляем cache
                 cache[symbol] = (score, direction, reasons)
-                last_update_ts = int(time.time())
 
                 if funding_spike:
                     await bot.send_message(chat_id, f"📈 {symbol} FUNDING SPIKE")
@@ -84,6 +88,9 @@ async def risk_loop(chat_id: int):
             except Exception as e:
                 print(f"[ERROR] {symbol}: {e}")
 
+        if had_any_attempt:
+            last_update_ts = int(time.time())
+
         await asyncio.sleep(INTERVAL_SECONDS)
 
 
@@ -100,7 +107,7 @@ async def start(message: types.Message):
         reply_markup=kb
     )
 
-    # 🔴 WAIT — только временно, до первого цикла
+    # временное состояние до первого цикла
     for symbol in SYMBOLS:
         cache[symbol] = (0, None, ["Идёт первый расчёт"])
 
@@ -143,3 +150,5 @@ threading.Thread(
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
+
+

@@ -19,7 +19,7 @@ cache = {}
 
 
 async def risk_loop(chat_id: int):
-    await asyncio.sleep(5)  # не сразу после /start
+    await asyncio.sleep(5)  # небольшая пауза после /start
 
     while chat_id in active_chats:
         for symbol in SYMBOLS:
@@ -37,9 +37,15 @@ async def risk_loop(chat_id: int):
                 last_funding[symbol] = funding
 
                 score, direction, reasons, funding_spike, oi_spike = calculate_risk(
-                    funding, prev_funding, long_ratio, oi_change, oi, liquidations
+                    funding,
+                    prev_funding,
+                    long_ratio,
+                    oi_change,
+                    oi,
+                    liquidations
                 )
 
+                # обновляем cache каждый цикл
                 cache[symbol] = (score, direction, reasons)
 
                 if funding_spike:
@@ -63,7 +69,7 @@ async def risk_loop(chat_id: int):
                 await bot.send_message(chat_id, text)
 
             except BinanceError:
-                pass  # молча, чтобы не спамить
+                pass  # не спамим ошибками бинанса
             except Exception as e:
                 print("ERROR:", e)
 
@@ -85,18 +91,41 @@ async def start(message: types.Message):
 
     if message.chat.id not in active_chats:
         active_chats.add(message.chat.id)
+
+        # 🔹 первичное заполнение cache, чтобы кнопка работала сразу
+        for symbol in SYMBOLS:
+            try:
+                funding = get_funding_rate(symbol)
+                long_ratio = get_long_short_ratio(symbol)
+                oi = get_open_interest(symbol)
+                liquidations = get_liquidations(symbol)
+
+                score, direction, reasons, *_ = calculate_risk(
+                    funding,
+                    None,
+                    long_ratio,
+                    0,
+                    oi,
+                    liquidations
+                )
+
+                cache[symbol] = (score, direction, reasons)
+            except Exception:
+                pass
+
         asyncio.create_task(risk_loop(message.chat.id))
 
 
 @dp.callback_query_handler(lambda c: c.data == "risk")
 async def current_risk(call: types.CallbackQuery):
     if not cache:
-        await call.message.answer("Пока нет данных")
+        await call.message.answer("Пока нет данных, рынок ещё не проверялся")
         return
 
     lines = []
     for symbol, (score, direction, _) in cache.items():
-        lines.append(f"{symbol}: {score} {direction or ''}")
+        dir_text = direction or "NEUTRAL"
+        lines.append(f"{symbol}: {score} ({dir_text})")
 
     await call.message.answer("\n".join(lines))
 

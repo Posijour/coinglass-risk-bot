@@ -1,3 +1,5 @@
+print("[BOOT] bot starting")
+
 async def risk_loop(chat_id: int):
     await asyncio.sleep(2)
     print("[LOOP] risk_loop started")
@@ -42,3 +44,4 @@ async def risk_loop(chat_id: int):
                 print("[BOT ERROR]", e)
 
         await asyncio.sleep(INTERVAL_SECONDS)
+

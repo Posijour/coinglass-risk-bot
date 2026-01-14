@@ -5,14 +5,12 @@ import websockets
 
 SYMBOLS = ["btcusdt", "ethusdt", "xrpusdt", "bnbusdt"]
 
-# === LIVE DATA CACHE ===
 funding = {}
-mark_price = {}
 open_interest = {}
 long_short_ratio = {}
 liquidations = {}
-
 last_update = {}
+
 
 def touch(symbol):
     last_update[symbol] = int(time.time())
@@ -23,10 +21,10 @@ async def binance_ws():
 
     for s in SYMBOLS:
         streams += [
-            f"{s}@markPrice@1s",        # funding + price
-            f"{s}@openInterest@1s",     # OI
-            f"{s}@aggTrade",            # trades
-            f"{s}@forceOrder"           # liquidations
+            f"{s}@markPrice@1s",
+            f"{s}@openInterest@1s",
+            f"{s}@aggTrade",
+            f"{s}@forceOrder"
         ]
 
     url = f"wss://fstream.binance.com/stream?streams={'/'.join(streams)}"
@@ -44,34 +42,25 @@ async def binance_ws():
                     if not symbol:
                         continue
 
-                    # MARK PRICE + FUNDING
                     if "markPrice" in stream:
                         funding[symbol] = float(data["r"])
-                        mark_price[symbol] = float(data["p"])
                         touch(symbol)
 
-                    # OPEN INTEREST
                     elif "openInterest" in stream:
                         open_interest[symbol] = float(data["oi"])
                         touch(symbol)
 
-                    # LIQUIDATIONS
                     elif "forceOrder" in stream:
-                        side = data["o"]["S"]
                         qty = float(data["o"]["q"])
                         liquidations[symbol] = liquidations.get(symbol, 0) + qty
                         touch(symbol)
 
-                    # AGG TRADES → для перекоса
                     elif "aggTrade" in stream:
-                        is_buyer_maker = data["m"]
                         ls = long_short_ratio.get(symbol, {"long": 0, "short": 0})
-
-                        if is_buyer_maker:
+                        if data["m"]:
                             ls["short"] += 1
                         else:
                             ls["long"] += 1
-
                         long_short_ratio[symbol] = ls
                         touch(symbol)
 
@@ -79,3 +68,8 @@ async def binance_ws():
             print("[WS ERROR]", e)
             await asyncio.sleep(5)
 
+
+def start_ws():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(binance_ws())

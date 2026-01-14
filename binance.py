@@ -1,48 +1,81 @@
-import requests
+import asyncio
+import json
+import time
+import websockets
 
-BASE = "https://fapi.binance.com"
+SYMBOLS = ["btcusdt", "ethusdt", "xrpusdt", "bnbusdt"]
 
-class BinanceError(Exception):
-    pass
+# === LIVE DATA CACHE ===
+funding = {}
+mark_price = {}
+open_interest = {}
+long_short_ratio = {}
+liquidations = {}
 
+last_update = {}
 
-def _get(path, params=None):
-    r = requests.get(BASE + path, params=params, timeout=10)
-    if r.status_code != 200:
-        raise BinanceError(f"{path} error {r.status_code}")
-    return r.json()
-
-
-def get_funding_rate(symbol: str) -> float:
-    data = _get("/fapi/v1/fundingRate", {"symbol": symbol, "limit": 1})
-    if not data:
-        raise BinanceError("empty funding data")
-    return float(data[0]["fundingRate"])
+def touch(symbol):
+    last_update[symbol] = int(time.time())
 
 
-def get_long_short_ratio(symbol: str) -> float:
-    data = _get(
-        "/futures/data/globalLongShortAccountRatio",
-        {"symbol": symbol, "period": "5m", "limit": 1}
-    )
-    if not data:
-        raise BinanceError("empty long/short ratio")
-    return float(data[0]["longAccount"])
+async def binance_ws():
+    streams = []
 
+    for s in SYMBOLS:
+        streams += [
+            f"{s}@markPrice@1s",        # funding + price
+            f"{s}@openInterest@1s",     # OI
+            f"{s}@aggTrade",            # trades
+            f"{s}@forceOrder"           # liquidations
+        ]
 
-def get_open_interest(symbol: str) -> float:
-    data = _get("/fapi/v1/openInterest", {"symbol": symbol})
-    return float(data["openInterest"])
+    url = f"wss://fstream.binance.com/stream?streams={'/'.join(streams)}"
+    print("[WS] connecting")
 
+    while True:
+        try:
+            async with websockets.connect(url, ping_interval=20) as ws:
+                async for raw in ws:
+                    msg = json.loads(raw)
+                    data = msg.get("data", {})
+                    stream = msg.get("stream", "")
 
-def get_liquidations(symbol: str) -> float:
-    return 0
-    data = _get(
-        "/futures/data/liqHist",
-        {"symbol": symbol, "limit": 1}
-    )
-    if not data:
-        raise BinanceError("empty liquidation data")
-    row = data[0]
-    return float(row["longVol"]) + float(row["shortVol"])
+                    symbol = data.get("s", "").upper()
+                    if not symbol:
+                        continue
+
+                    # MARK PRICE + FUNDING
+                    if "markPrice" in stream:
+                        funding[symbol] = float(data["r"])
+                        mark_price[symbol] = float(data["p"])
+                        touch(symbol)
+
+                    # OPEN INTEREST
+                    elif "openInterest" in stream:
+                        open_interest[symbol] = float(data["oi"])
+                        touch(symbol)
+
+                    # LIQUIDATIONS
+                    elif "forceOrder" in stream:
+                        side = data["o"]["S"]
+                        qty = float(data["o"]["q"])
+                        liquidations[symbol] = liquidations.get(symbol, 0) + qty
+                        touch(symbol)
+
+                    # AGG TRADES → для перекоса
+                    elif "aggTrade" in stream:
+                        is_buyer_maker = data["m"]
+                        ls = long_short_ratio.get(symbol, {"long": 0, "short": 0})
+
+                        if is_buyer_maker:
+                            ls["short"] += 1
+                        else:
+                            ls["long"] += 1
+
+                        long_short_ratio[symbol] = ls
+                        touch(symbol)
+
+        except Exception as e:
+            print("[WS ERROR]", e)
+            await asyncio.sleep(5)
 

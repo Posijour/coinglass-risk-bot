@@ -102,33 +102,29 @@ async def current_risk(call: types.CallbackQuery):
 
     await call.message.answer("\n".join(lines))
 
-
 class PingHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
 
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
 
 def start_http():
     HTTPServer(("0.0.0.0", 8080), PingHandler).serve_forever()
 
-def do_HEAD(self):
-    self.send_response(200)
-    self.end_headers()
-
 async def on_startup(dp):
-    print("[BOOT] bot starting")
+    print("[BOOT] on_startup", flush=True)
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(binance_ws())
 
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
-    threading.Thread(target=start_ws, daemon=True).start()
+    
     executor.start_polling(
     dp,
     skip_updates=True,
     on_startup=on_startup
     )
-
-

@@ -7,65 +7,58 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
 from config import *
-from binance import *
 from risk import calculate_risk
-
-
-async def call(fn, *args):
-    return await asyncio.to_thread(fn, *args)
-
+from ws_binance import (
+    funding,
+    open_interest,
+    long_short_ratio,
+    liquidations,
+    last_update,
+    binance_ws
+)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 active_chats = set()
-
 last_oi = {}
 last_funding = {}
-
 cache = {}
-last_update_ts = None
 
 
 async def risk_loop(chat_id: int):
-    global last_update_ts
-
-    await asyncio.sleep(3)
-
-    print(f"[LOOP] cycle done, cache size = {len(cache)}")
+    await asyncio.sleep(5)
 
     while chat_id in active_chats:
-        cycle_had_data = False
-
         for symbol in SYMBOLS:
             try:
-                funding = await call(get_funding_rate, symbol)
-                if funding is None:
-                    print(f"[BINANCE] {symbol}: empty funding data")
+                f = funding.get(symbol)
+                oi = open_interest.get(symbol)
+                ls = long_short_ratio.get(symbol)
+                liq = liquidations.get(symbol, 0)
+
+                if f is None or oi is None or ls is None:
                     continue
 
-                long_ratio = await call(get_long_short_ratio, symbol)
-                oi = await call(get_open_interest, symbol)
-                liquidations = await call(get_liquidations, symbol)
+                long_ratio = ls["long"] / max(ls["long"] + ls["short"], 1)
 
                 prev_oi = last_oi.get(symbol, oi)
                 oi_change = oi - prev_oi
                 last_oi[symbol] = oi
 
                 prev_funding = last_funding.get(symbol)
-                last_funding[symbol] = funding
+                last_funding[symbol] = f
 
                 score, direction, reasons, funding_spike, oi_spike = calculate_risk(
-                    funding,
+                    f,
                     prev_funding,
                     long_ratio,
                     oi_change,
                     oi,
-                    liquidations
+                    liq
                 )
 
                 cache[symbol] = (score, direction, reasons)
-                cycle_had_data = True
 
                 if funding_spike:
                     await bot.send_message(chat_id, f"📈 {symbol} FUNDING SPIKE")
@@ -83,18 +76,13 @@ async def risk_loop(chat_id: int):
                 text = (
                     f"{prefix} {symbol}\n\n"
                     f"Risk score: {score}\n"
-                    f"Direction: {direction or 'NEUTRAL'}\n\n"
+                    f"Direction: {direction}\n\n"
                     + "\n".join(f"- {r}" for r in reasons)
                 )
                 await bot.send_message(chat_id, text)
 
-            except BinanceError as e:
-                print(f"[BINANCE] {symbol}: {e}")
             except Exception as e:
-                print(f"[ERROR] {symbol}: {e}")
-
-        if cycle_had_data:
-            last_update_ts = int(time.time())
+                print("[BOT ERROR]", e)
 
         await asyncio.sleep(INTERVAL_SECONDS)
 
@@ -112,9 +100,6 @@ async def start(message: types.Message):
         reply_markup=kb
     )
 
-    for symbol in SYMBOLS:
-        cache[symbol] = (0, None, ["Ожидание данных от Binance"])
-
     if message.chat.id not in active_chats:
         active_chats.add(message.chat.id)
         asyncio.create_task(risk_loop(message.chat.id))
@@ -123,15 +108,14 @@ async def start(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data == "risk")
 async def current_risk(call: types.CallbackQuery):
     if not cache:
-        await call.message.answer("⏳ Данных пока нет")
+        await call.message.answer("⏳ Данные ещё собираются")
         return
 
     lines = []
     for symbol, (score, direction, _) in cache.items():
-        lines.append(f"{symbol}: {score} ({direction or 'NEUTRAL'})")
-
-    ts = time.strftime("%H:%M:%S", time.localtime(last_update_ts)) if last_update_ts else "—"
-    lines.append(f"\n🕒 Обновлено: {ts}")
+        ts = last_update.get(symbol)
+        t = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else "—"
+        lines.append(f"{symbol}: {score} ({direction or 'NEUTRAL'}) ⏱ {t}")
 
     await call.message.answer("\n".join(lines))
 
@@ -142,10 +126,6 @@ class PingHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"OK")
 
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
-
 
 threading.Thread(
     target=lambda: HTTPServer(("0.0.0.0", 8080), PingHandler).serve_forever(),
@@ -153,7 +133,9 @@ threading.Thread(
 ).start()
 
 
+async def on_startup(dp):
+    asyncio.create_task(binance_ws())
+
+
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
-
-
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)

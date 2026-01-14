@@ -1,10 +1,11 @@
 import asyncio
 import time
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
 
 from config import *
 from risk import calculate_risk
@@ -14,7 +15,7 @@ from ws_binance import (
     long_short_ratio,
     liquidations,
     last_update,
-    binance_ws
+    start_ws
 )
 
 print("[BOOT] bot starting")
@@ -51,7 +52,7 @@ async def risk_loop(chat_id: int):
                 prev_funding = last_funding.get(symbol)
                 last_funding[symbol] = f
 
-                score, direction, reasons, funding_spike, oi_spike = calculate_risk(
+                score, direction, reasons, *_ = calculate_risk(
                     f,
                     prev_funding,
                     long_ratio,
@@ -62,18 +63,6 @@ async def risk_loop(chat_id: int):
 
                 cache[symbol] = (score, direction, reasons)
                 print(f"[CACHE] updated {symbol}")
-
-                if funding_spike:
-                    await bot.send_message(chat_id, f"📈 {symbol} FUNDING SPIKE")
-
-                if oi_spike:
-                    await bot.send_message(chat_id, f"💥 {symbol} OI SPIKE")
-
-                if score >= HARD_ALERT_LEVEL:
-                    await bot.send_message(
-                        chat_id,
-                        f"⚠️ {symbol}\nRisk: {score}\nDirection: {direction}"
-                    )
 
             except Exception as e:
                 print("[BOT ERROR]", e)
@@ -88,8 +77,7 @@ async def start(message: types.Message):
     )
 
     await message.reply(
-        "Я слежу за Binance Futures.\n"
-        "Пишу только когда реально опасно.",
+        "Я слежу за Binance Futures.\nПишу только когда реально опасно.",
         reply_markup=kb
     )
 
@@ -124,11 +112,7 @@ def start_http():
     HTTPServer(("0.0.0.0", 8080), PingHandler).serve_forever()
 
 
-async def on_startup(dp):
-    print("[BOOT] starting websocket")
-    asyncio.create_task(binance_ws())
-
-
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
-    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+    threading.Thread(target=start_ws, daemon=True).start()
+    executor.start_polling(dp, skip_updates=True)

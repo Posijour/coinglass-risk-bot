@@ -59,6 +59,9 @@ async def risk_loop(chat_id: int):
                 )
 
                 cache[symbol] = (score, direction, reasons)
+                last_update_ts = int(time.time())
+                print(f"[CACHE] updated {symbol} at {last_update_ts}")
+
 
                 if funding_spike:
                     await bot.send_message(chat_id, f"📈 {symbol} FUNDING SPIKE")
@@ -139,3 +142,4 @@ async def on_startup(dp):
 
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+

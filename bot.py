@@ -15,7 +15,8 @@ from ws_binance import (
     long_short_ratio,
     liquidations,
     last_update,
-    start_ws
+    start_ws,
+    binance_ws
 )
 
 print("[BOOT] bot starting")
@@ -117,6 +118,10 @@ async def on_startup(dp):
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(binance_ws())
 
+def do_HEAD(self):
+    self.send_response(200)
+    self.end_headers()
+
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     threading.Thread(target=start_ws, daemon=True).start()
@@ -125,3 +130,4 @@ if __name__ == "__main__":
     skip_updates=True,
     on_startup=on_startup
     )
+

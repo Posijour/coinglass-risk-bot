@@ -38,7 +38,7 @@ async def risk_loop(chat_id: int):
         for symbol in SYMBOLS:
             try:
                 f = funding.get(symbol)
-                oi = open_interest.get(symbol, 0)
+                oi = open_interest.get(symbol)
                 ls = long_short_ratio.get(symbol, {"long": 0, "short": 0})
                 liq = liquidations.get(symbol, 0)
 
@@ -74,10 +74,10 @@ async def risk_loop(chat_id: int):
                 print(f"[CACHE] updated {symbol}")
 
             except Exception as e:
-                print("[BOT ERROR]", e)
+                import traceback
+                traceback.print_exc()
 
         await asyncio.sleep(INTERVAL_SECONDS)
-
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
@@ -138,5 +138,6 @@ if __name__ == "__main__":
     skip_updates=True,
     on_startup=on_startup
     )
+
 
 

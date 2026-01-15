@@ -2,8 +2,7 @@ import asyncio
 import json
 import time
 import websockets
-
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "BNBUSDT"]
+from config import SYMBOLS
 
 funding = {}
 open_interest = {}
@@ -20,6 +19,7 @@ async def binance_ws():
     streams = []
 
     for s in SYMBOLS:
+        s = s.lower()
         streams += [
             f"{s}@markPrice@1s",
             f"{s}@aggTrade",
@@ -70,6 +70,7 @@ def start_ws():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(binance_ws())
+
 
 
 

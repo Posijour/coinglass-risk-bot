@@ -38,12 +38,14 @@ async def risk_loop(chat_id: int):
         for symbol in SYMBOLS:
             try:
                 f = funding.get(symbol)
-                oi = open_interest.get(symbol)
+                oi = open_interest.get(symbol, 0)
                 ls = long_short_ratio.get(symbol)
                 liq = liquidations.get(symbol, 0)
 
                 if f is None or oi is None or ls is None:
                     continue
+
+                print(f"[RISK] {symbol} f={f} ls={ls}", flush=True)
 
                 long_ratio = ls["long"] / max(ls["long"] + ls["short"], 1)
 
@@ -128,3 +130,4 @@ if __name__ == "__main__":
     skip_updates=True,
     on_startup=on_startup
     )
+

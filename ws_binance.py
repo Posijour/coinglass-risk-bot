@@ -34,6 +34,8 @@ async def binance_ws():
             async with websockets.connect(url, ping_interval=20) as ws:
                 async for raw in ws:
                     msg = json.loads(raw)
+                    if "data" in msg:
+                        print(f"[WS] tick {msg.get('stream')}", flush=True)
                     data = msg.get("data", {})
                     stream = msg.get("stream", "")
 
@@ -68,4 +70,5 @@ def start_ws():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(binance_ws())
+
 

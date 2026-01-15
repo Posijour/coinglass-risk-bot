@@ -3,7 +3,7 @@ import json
 import time
 import websockets
 
-SYMBOLS = ["btcusdt", "ethusdt", "xrpusdt", "bnbusdt"]
+SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "BNBUSDT"]
 
 funding = {}
 open_interest = {}
@@ -70,5 +70,6 @@ def start_ws():
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(binance_ws())
+
 
 

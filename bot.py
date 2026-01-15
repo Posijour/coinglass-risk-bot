@@ -8,14 +8,12 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
 from config import *
-from risk import calculate_risk
 from ws_binance import (
     funding,
     open_interest,
     long_short_ratio,
     liquidations,
     last_update,
-    start_ws,
     binance_ws
 )
 
@@ -32,52 +30,44 @@ cache = {}
 
 
 async def risk_loop(chat_id: int):
+    print(f"[RISK LOOP] started for chat {chat_id}", flush=True)
     await asyncio.sleep(5)
 
     while chat_id in active_chats:
+        print("[RISK LOOP] tick", flush=True)
+
         for symbol in SYMBOLS:
             try:
                 f = funding.get(symbol)
                 oi = open_interest.get(symbol)
-                ls = long_short_ratio.get(symbol, {"long": 0, "short": 0})
+                ls = long_short_ratio.get(symbol)
                 liq = liquidations.get(symbol, 0)
+
+                print(
+                    f"[DEBUG] {symbol} "
+                    f"funding={f} "
+                    f"oi={oi} "
+                    f"ls={ls}",
+                    flush=True
+                )
 
                 if f is None or oi is None or ls is None:
                     continue
 
-                print(f"[RISK] {symbol} f={f} ls={ls}", flush=True)
-
-                long_ratio = ls["long"] / max(ls["long"] + ls["short"], 1)
-
-                prev_oi = last_oi.get(symbol, oi)
-                oi_change = oi - prev_oi
-                last_oi[symbol] = oi
-
-                prev_funding = last_funding.get(symbol)
-                last_funding[symbol] = f
-
-                score, direction, reasons, *_ = calculate_risk(
-                    f,
-                    prev_funding,
-                    long_ratio,
-                    oi_change,
-                    oi,
-                    liq
-                )
-                
-                print(
-                    f"[RISK] {symbol} f={f} long={ls['long']} short={ls['short']}",
-                    flush=True
-                )
+                # ===== ВРЕМЕННАЯ ЗАГЛУШКА ВМЕСТО calculate_risk =====
+                score = 1
+                direction = "DEBUG"
+                reasons = ["debug mode"]
 
                 cache[symbol] = (score, direction, reasons)
-                print(f"[CACHE] updated {symbol}")
+                print(f"[CACHE] updated {symbol}", flush=True)
 
-            except Exception as e:
+            except Exception:
                 import traceback
                 traceback.print_exc()
 
         await asyncio.sleep(INTERVAL_SECONDS)
+
 
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
@@ -90,9 +80,10 @@ async def start(message: types.Message):
         reply_markup=kb
     )
 
+    # прогрев кэша
     for s in SYMBOLS:
         cache[s] = (0, None, ["Идёт прогрев данных"])
-        
+
     if message.chat.id not in active_chats:
         active_chats.add(message.chat.id)
         asyncio.create_task(risk_loop(message.chat.id))
@@ -112,6 +103,7 @@ async def current_risk(call: types.CallbackQuery):
 
     await call.message.answer("\n".join(lines))
 
+
 class PingHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -122,22 +114,26 @@ class PingHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
 
+
 def start_http():
     HTTPServer(("0.0.0.0", 8080), PingHandler).serve_forever()
+
 
 async def on_startup(dp):
     print("[BOOT] on_startup", flush=True)
     await bot.delete_webhook(drop_pending_updates=True)
     asyncio.create_task(binance_ws())
 
+
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
-    
+
     executor.start_polling(
-    dp,
-    skip_updates=True,
-    on_startup=on_startup
+        dp,
+        skip_updates=True,
+        on_startup=on_startup
     )
+
 
 
 

@@ -5,6 +5,19 @@ SYMBOLS = [
     "ETHUSDT",
     "XRPUSDT",
     "BNBUSDT",
+    "XRPUSDT",
+    "SOLUSDT",
+    "DOGEUSDT",
+    "ADAUSDT",
+    "LINKUSDT",
+    "LTCUSDT",
+    "BCHUSDT",
+    "TRXUSDT",
+    "XLMUSDT",
+    "HBARUSDT",
+    "XMRUSDT",
+    "ZECUSDT",
+    "HYPEUSDT",
 ]
 
 INTERVAL_SECONDS = 300
@@ -18,4 +31,17 @@ LIQ_THRESHOLDS = {
     "ETHUSDT": 15_000_000,
     "BNBUSDT": 5_000_000,
     "XRPUSDT": 3_000_000,
+    "SOLUSDT": 12_000_000,
+    "DOGEUSDT": 10_000_000,
+    "ADAUSDT": 8_000_000,
+    "LINKUSDT": 6_000_000,
+    "LTCUSDT": 6_000_000,
+    "BCHUSDT": 5_000_000,
+    "TRXUSDT": 4_000_000,
+    "XLMUSDT": 3_500_000,
+    "HBARUSDT": 3_000_000,
+    "XMRUSDT": 2_500_000,
+    "ZECUSDT": 2_000_000,
+    "HYPEUSDT": 1_500_000,
 }
+

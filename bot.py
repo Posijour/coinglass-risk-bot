@@ -15,18 +15,17 @@ from ws_binance import (
     long_short_ratio,
     liquidations,
     last_update,
+    oi_window,
     binance_ws
 )
-
-print("[BOOT] bot starting", flush=True)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 active_chats = set()
-last_oi = {}
 last_funding = {}
 cache = {}
+last_spikes = {"funding": {}, "oi": {}}
 
 
 async def risk_loop(chat_id: int):
@@ -39,34 +38,32 @@ async def risk_loop(chat_id: int):
                 if f is None:
                     continue
 
-                oi = open_interest.get(symbol) or 0
-                ls = long_short_ratio.get(symbol) or {"long": 0, "short": 0}
-                liq = liquidations.get(symbol, 0)
+                ls = long_short_ratio.get(symbol, {"long": 0, "short": 0})
+                total = ls["long"] + ls["short"]
+                long_ratio = ls["long"] / total if total else 0.5
 
-                long_ratio = ls["long"] / max(ls["long"] + ls["short"], 1)
-
-                prev_oi = last_oi.get(symbol, oi)
-                oi_change = oi - prev_oi
-                last_oi[symbol] = oi
-
-                prev_funding = last_funding.get(symbol)
+                prev_f = last_funding.get(symbol)
                 last_funding[symbol] = f
 
                 score, direction, reasons, funding_spike, oi_spike = calculate_risk(
                     f,
-                    prev_funding,
+                    prev_f,
                     long_ratio,
-                    oi_change,
-                    oi,
-                    liq
+                    oi_window[symbol],
+                    liquidations.get(symbol, 0),
+                    LIQ_THRESHOLDS[symbol]
                 )
 
                 cache[symbol] = (score, direction, reasons)
 
-                if funding_spike:
+                now = time.time()
+
+                if funding_spike and now - last_spikes["funding"].get(symbol, 0) > 900:
+                    last_spikes["funding"][symbol] = now
                     await bot.send_message(chat_id, f"📈 {symbol} FUNDING SPIKE")
 
-                if oi_spike:
+                if oi_spike and now - last_spikes["oi"].get(symbol, 0) > 900:
+                    last_spikes["oi"][symbol] = now
                     await bot.send_message(chat_id, f"💥 {symbol} OI SPIKE")
 
                 if score >= HARD_ALERT_LEVEL and direction:
@@ -85,10 +82,24 @@ async def risk_loop(chat_id: int):
 
                 await bot.send_message(chat_id, text)
 
-            except Exception as e:
-                print("[BOT ERROR]", e, flush=True)
+            except Exception:
+                pass
 
         await asyncio.sleep(INTERVAL_SECONDS)
+
+
+async def send_current_risk(chat_id):
+    if not cache:
+        await bot.send_message(chat_id, "⏳ Данные ещё собираются")
+        return
+
+    lines = []
+    for symbol, (score, direction, _) in cache.items():
+        ts = last_update.get(symbol)
+        t = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else "—"
+        lines.append(f"{symbol}: {score} ({direction or 'NEUTRAL'}) ⏱ {t}")
+
+    await bot.send_message(chat_id, "\n".join(lines))
 
 
 @dp.message_handler(commands=["start"])
@@ -104,27 +115,19 @@ async def start(message: types.Message):
         reply_markup=kb
     )
 
-    for s in SYMBOLS:
-        cache[s] = (0, None, ["Идёт прогрев данных"])
-
     if message.chat.id not in active_chats:
         active_chats.add(message.chat.id)
         asyncio.create_task(risk_loop(message.chat.id))
 
 
+@dp.message_handler(commands=["risk"])
+async def risk_cmd(message: types.Message):
+    await send_current_risk(message.chat.id)
+
+
 @dp.callback_query_handler(lambda c: c.data == "risk")
 async def current_risk(call: types.CallbackQuery):
-    if not cache:
-        await call.message.answer("⏳ Данные ещё собираются")
-        return
-
-    lines = []
-    for symbol, (score, direction, _) in cache.items():
-        ts = last_update.get(symbol)
-        t = time.strftime("%H:%M:%S", time.localtime(ts)) if ts else "—"
-        lines.append(f"{symbol}: {score} ({direction or 'NEUTRAL'}) ⏱ {t}")
-
-    await call.message.answer("\n".join(lines))
+    await send_current_risk(call.message.chat.id)
 
 
 class PingHandler(BaseHTTPRequestHandler):
@@ -132,10 +135,6 @@ class PingHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
-
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
 
 
 def start_http():
@@ -149,9 +148,4 @@ async def on_startup(dp):
 
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
-
-    executor.start_polling(
-        dp,
-        skip_updates=True,
-        on_startup=on_startup
-    )
+    executor.start_polling(dp, skip_updates=True, on_startup=on_startup)

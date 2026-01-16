@@ -2,7 +2,8 @@ import asyncio
 import json
 import time
 import websockets
-from config import SYMBOLS
+from collections import deque
+from config import SYMBOLS, WINDOW_SECONDS
 
 funding = {}
 open_interest = {}
@@ -10,14 +11,24 @@ long_short_ratio = {}
 liquidations = {}
 last_update = {}
 
+# окна по времени
+trades_window = {s: deque() for s in SYMBOLS}
+liq_window = {s: deque() for s in SYMBOLS}
+oi_window = {s: deque() for s in SYMBOLS}
+
 
 def touch(symbol):
     last_update[symbol] = int(time.time())
 
 
+def cleanup_window(dq):
+    now = time.time()
+    while dq and now - dq[0][0] > WINDOW_SECONDS:
+        dq.popleft()
+
+
 async def binance_ws():
     streams = []
-
     for s in SYMBOLS:
         s = s.lower()
         streams += [
@@ -28,55 +39,55 @@ async def binance_ws():
         ]
 
     url = f"wss://fstream.binance.com/stream?streams={'/'.join(streams)}"
-    print("[WS] connecting")
 
     while True:
         try:
             async with websockets.connect(url, ping_interval=20) as ws:
                 async for raw in ws:
                     msg = json.loads(raw)
-                    if "data" in msg:
-                        print(f"[WS] tick {msg.get('stream')}", flush=True)
                     data = msg.get("data", {})
                     stream = msg.get("stream", "")
 
                     symbol = data.get("s", "").upper()
-                    if not symbol:
+                    if symbol not in SYMBOLS:
                         continue
+
+                    now = time.time()
 
                     if "markPrice" in stream:
                         funding[symbol] = float(data["r"])
                         touch(symbol)
 
-                    elif "forceOrder" in stream:
-                        qty = float(data["o"]["q"])
-                        liquidations[symbol] = liquidations.get(symbol, 0) + qty
-                        touch(symbol)
-
                     elif "openInterest" in stream:
-                        open_interest[symbol] = float(data["oi"])
+                        oi = float(data["oi"])
+                        open_interest[symbol] = oi
+                        oi_window[symbol].append((now, oi))
+                        cleanup_window(oi_window[symbol])
                         touch(symbol)
 
                     elif "aggTrade" in stream:
-                        ls = long_short_ratio.get(symbol, {"long": 0, "short": 0})
-                        if data["m"]:
-                            ls["short"] += 1
-                        else:
-                            ls["long"] += 1
-                        long_short_ratio[symbol] = ls
+                        qty = float(data["q"])
+                        is_maker = data["m"]
+                        trades_window[symbol].append(
+                            (now, qty, "short" if is_maker else "long")
+                        )
+                        cleanup_window(trades_window[symbol])
+
+                        long_vol = sum(q for _, q, d in trades_window[symbol] if d == "long")
+                        short_vol = sum(q for _, q, d in trades_window[symbol] if d == "short")
+
+                        long_short_ratio[symbol] = {
+                            "long": long_vol,
+                            "short": short_vol
+                        }
                         touch(symbol)
 
-        except Exception as e:
-            print("[WS ERROR]", e)
+                    elif "forceOrder" in stream:
+                        qty = float(data["o"]["q"])
+                        liq_window[symbol].append((now, qty))
+                        cleanup_window(liq_window[symbol])
+                        liquidations[symbol] = sum(q for _, q in liq_window[symbol])
+                        touch(symbol)
+
+        except Exception:
             await asyncio.sleep(5)
-
-
-def start_ws():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(binance_ws())
-
-
-
-
-

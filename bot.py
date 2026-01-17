@@ -1,3 +1,4 @@
+ws_task = None
 import asyncio
 import time
 import threading
@@ -27,6 +28,24 @@ last_funding = {}
 cache = {}
 last_spikes = {"funding": {}, "oi": {}}
 
+async def ws_watchdog():
+    global ws_task
+
+    while True:
+        await asyncio.sleep(60)
+
+        if not last_update:
+            continue
+
+        now = time.time()
+        freshest = max(last_update.values())
+
+        # если данных нет больше 3 минут — WS мёртв
+        if now - freshest > 180:
+            if ws_task:
+                ws_task.cancel()
+
+            ws_task = asyncio.create_task(binance_ws())
 
 async def risk_loop(chat_id: int):
     await asyncio.sleep(5)
@@ -152,10 +171,13 @@ def start_http():
 
 async def on_startup(dp):
     await bot.delete_webhook(drop_pending_updates=True)
-    asyncio.create_task(binance_ws())
+    global ws_task
+    ws_task = asyncio.create_task(binance_ws())
+    asyncio.create_task(ws_watchdog())
 
 
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 

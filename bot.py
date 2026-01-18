@@ -6,18 +6,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 
+import ws_binance as ws
+import risk
 from config import *
-from risk import calculate_risk
-from ws_binance import (
-    funding,
-    long_short_ratio,
-    liquidations,
-    last_update,
-    oi_window,
-    mark_price,
-    liq_sides,
-    binance_ws
-)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
@@ -37,24 +28,30 @@ ws_task = None
 ws_running = False
 
 
+# ---------------- WS SAFE START ----------------
+
 async def start_ws_safe():
     global ws_running
     if ws_running:
         return
     ws_running = True
     try:
-        await binance_ws()
+        await ws.binance_ws()
     finally:
         ws_running = False
 
+
+# ---------------- WS WATCHDOG ----------------
 
 async def ws_watchdog():
     global ws_task
     while True:
         await asyncio.sleep(60)
-        if not last_update:
+
+        if not ws.last_update:
             continue
-        freshest = max(last_update.values())
+
+        freshest = max(ws.last_update.values())
         if time.time() - freshest > 180:
             if ws_task and not ws_task.done():
                 ws_task.cancel()
@@ -62,8 +59,11 @@ async def ws_watchdog():
                     await ws_task
                 except asyncio.CancelledError:
                     pass
+
             ws_task = asyncio.create_task(start_ws_safe())
 
+
+# ---------------- GLOBAL RISK LOOP ----------------
 
 async def global_risk_loop():
     await asyncio.sleep(10)
@@ -74,7 +74,7 @@ async def global_risk_loop():
                 now = time.time()
 
                 # -------- FUNDING --------
-                f = funding.get(symbol)
+                f = ws.funding.get(symbol)
                 pf = last_funding.get(symbol)
 
                 funding_valid = False
@@ -89,30 +89,33 @@ async def global_risk_loop():
                     funding_valid = True
 
                 # -------- OI --------
-                oi_vals = oi_window.get(symbol, [])
+                oi_vals = ws.oi_window.get(symbol, [])
                 oi_valid = len(oi_vals) >= 2
                 if oi_valid:
                     last_oi_ts[symbol] = now
 
                 # -------- LIQ --------
-                liq = liquidations.get(symbol, 0)
+                liq = ws.liquidations.get(symbol, 0)
                 liq_valid = liq > 0
                 if liq_valid:
                     last_liq_ts[symbol] = now
 
-                ls = long_short_ratio.get(symbol, {"long": 0, "short": 0})
+                ls = ws.long_short_ratio.get(symbol, {"long": 0, "short": 0})
                 total = ls["long"] + ls["short"]
                 long_ratio = ls["long"] / total if total else 0.5
 
-                score, direction, reasons, funding_spike, oi_spike = calculate_risk(
+                price = getattr(ws, "mark_price", {}).get(symbol)
+                liq_sides = getattr(ws, "liq_sides", {}).get(symbol, {})
+
+                score, direction, reasons, funding_spike, oi_spike = risk.calculate_risk(
                     f if funding_valid else None,
                     pf,
                     long_ratio,
                     oi_vals if oi_valid else [],
                     liq if liq_valid else 0,
                     LIQ_THRESHOLDS[symbol],
-                    mark_price.get(symbol),
-                    liq_sides.get(symbol, {})
+                    price,
+                    liq_sides
                 )
 
                 cache[symbol] = (score, direction, reasons)
@@ -150,6 +153,8 @@ async def global_risk_loop():
         await asyncio.sleep(INTERVAL_SECONDS)
 
 
+# ---------------- COMMANDS ----------------
+
 def ensure_chat(chat_id):
     active_chats.add(chat_id)
 
@@ -167,6 +172,8 @@ async def send_current_risk(chat_id):
     await bot.send_message(chat_id, "\n".join(lines))
 
 
+# ---------------- HEALTH ----------------
+
 class PingHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/", "/health"):
@@ -181,6 +188,8 @@ class PingHandler(BaseHTTPRequestHandler):
 def start_http():
     HTTPServer(("0.0.0.0", 8080), PingHandler).serve_forever()
 
+
+# ---------------- STARTUP ----------------
 
 async def on_startup(dp):
     global ws_task

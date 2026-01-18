@@ -9,6 +9,7 @@ from aiogram.utils import executor
 import ws_binance as ws
 import risk
 import meta
+import divergence
 from config import *
 
 bot = Bot(token=BOT_TOKEN)
@@ -22,8 +23,6 @@ prev_scores = {}
 last_funding = {}
 prev_funding = {}
 last_funding_ts = {}
-last_oi_ts = {}
-last_liq_ts = {}
 
 ws_task = None
 ws_running = False
@@ -92,14 +91,9 @@ async def global_risk_loop():
                 # -------- OI --------
                 oi_vals = ws.oi_window.get(symbol, [])
                 oi_valid = len(oi_vals) >= 2
-                if oi_valid:
-                    last_oi_ts[symbol] = now
 
                 # -------- LIQ --------
                 liq = ws.liquidations.get(symbol, 0)
-                liq_valid = liq > 0
-                if liq_valid:
-                    last_liq_ts[symbol] = now
 
                 ls = ws.long_short_ratio.get(symbol, {"long": 0, "short": 0})
                 total = ls["long"] + ls["short"]
@@ -113,35 +107,34 @@ async def global_risk_loop():
                     pf,
                     long_ratio,
                     oi_vals if oi_valid else [],
-                    liq if liq_valid else 0,
+                    liq,
                     LIQ_THRESHOLDS[symbol],
                     price,
                     liq_sides
                 )
 
-                cache[symbol] = (
+                # cache ТОЛЬКО базовый риск
+                cache[symbol] = (score, direction, reasons)
+
+                # ---------- ALERT FILTERING ----------
+
+                quality = meta.stream_quality(symbol)
+                if quality["level"] == "LOW":
+                    continue  # SUPPRESSION при плохих данных
+
+                confidence = meta.calculate_confidence(
                     score,
                     direction,
-                    reasons,
-                    funding_spike,
                     oi_spike,
+                    funding_spike,
                     liq,
                     price,
-                    liq_sides,
+                    liq_sides
                 )
 
                 for chat_id in active_chats:
-                    if funding_spike and funding_valid:
-                        if now - last_spikes["funding"].get(symbol, 0) > 900:
-                            last_spikes["funding"][symbol] = now
-                            await bot.send_message(chat_id, f"📈 {symbol} FUNDING SPIKE")
 
-                    if oi_spike and oi_valid:
-                        if now - last_spikes["oi"].get(symbol, 0) > 900:
-                            last_spikes["oi"][symbol] = now
-                            await bot.send_message(chat_id, f"💥 {symbol} OI SPIKE")
-
-                    if score >= HARD_ALERT_LEVEL and direction:
+                    if score >= HARD_ALERT_LEVEL and direction and confidence >= 3:
                         prefix = "🚨 HARD RISK ALERT"
                     elif score >= EARLY_ALERT_LEVEL:
                         prefix = "⚠️ RISK BUILDUP"
@@ -151,7 +144,8 @@ async def global_risk_loop():
                     text = (
                         f"{prefix} {symbol}\n\n"
                         f"Risk score: {score}\n"
-                        f"Direction: {direction}\n\n"
+                        f"Direction: {direction}\n"
+                        f"Confidence: {meta.confidence_level(confidence)}\n\n"
                         + "\n".join(f"- {r}" for r in reasons)
                     )
 
@@ -181,36 +175,41 @@ async def risk_cmd(message: types.Message):
         return
 
     symbol = parts[1].upper()
-
     if symbol not in cache:
         await message.reply("❌ Неизвестный символ")
         return
 
-    (
+    is_full = len(parts) >= 3 and parts[2].lower() == "full"
+
+    score, direction, reasons = cache[symbol]
+
+    liq = ws.liquidations.get(symbol, 0)
+    price = getattr(ws, "mark_price", {}).get(symbol)
+    liq_sides = getattr(ws, "liq_sides", {}).get(symbol, {})
+    oi_vals = ws.oi_window.get(symbol, [])
+    funding = ws.funding.get(symbol)
+
+    quality = meta.stream_quality(symbol)
+    state = meta.detect_state(score, False, False, liq)
+    confidence = meta.calculate_confidence(
         score,
         direction,
-        reasons,
-        funding_spike,
-        oi_spike,
+        False,
+        False,
         liq,
         price,
-        liq_sides,
-    ) = cache[symbol]
+        liq_sides
+    )
+    conf_level = meta.confidence_level(confidence)
 
-    # /risk BTCUSDT full
-    if len(parts) >= 3 and parts[2].lower() == "full":
-        state = meta.detect_state(score, oi_spike, funding_spike, liq)
-        confidence = meta.calculate_confidence(
-            score,
-            direction,
-            oi_spike,
-            funding_spike,
-            liq,
-            price,
-            liq_sides,
+    if is_full:
+        divs = divergence.detect_divergence(
+            oi_vals,
+            funding,
+            ws.long_short_ratio.get(symbol, {}).get("long", 0),
+            [],
+            liq_sides
         )
-        conf_level = meta.confidence_level(confidence)
-        quality = meta.stream_quality(symbol)
 
         text = (
             f"{symbol}\n"
@@ -221,10 +220,14 @@ async def risk_cmd(message: types.Message):
             + "\n".join(f"- {r}" for r in reasons)
         )
 
+        if divs:
+            text += "\n\nDivergences:\n" + "\n".join(f"- {d}" for d in divs)
+
         await message.reply(text)
         return
 
-    # /risk BTCUSDT (simple)
+    # -------- SIMPLE RISK --------
+
     prev = prev_scores.get(symbol, score)
     trend = (
         "rising" if score > prev else
@@ -233,10 +236,8 @@ async def risk_cmd(message: types.Message):
     )
     prev_scores[symbol] = score
 
-    f = ws.funding.get(symbol)
-    f_txt = f"{f:+.4f}" if f is not None else "—"
+    f_txt = f"{funding:+.4f}" if funding is not None else "—"
 
-    oi_vals = ws.oi_window.get(symbol, [])
     oi_txt = (
         f"{(oi_vals[-1][1] - oi_vals[0][1]) / oi_vals[0][1] * 100:+.1f}%"
         if len(oi_vals) >= 2 and oi_vals[0][1] > 0 else "—"
@@ -261,37 +262,9 @@ async def risk_cmd(message: types.Message):
     await message.reply(text)
 
 
-@dp.message_handler(commands=["quality"])
-async def quality_cmd(message: types.Message):
-    ensure_chat(message.chat.id)
-
-    parts = message.text.strip().split()
-    if len(parts) < 2:
-        await message.reply("Использование: /quality BTCUSDT")
-        return
-
-    symbol = parts[1].upper()
-    q = meta.stream_quality(symbol)
-
-    checks = q["checks"]
-    lines = [
-        f"{symbol}",
-        f"Quality: {q['score']} / {q['max']} ({q['level']})",
-        "",
-        f"WS: {'✅' if checks['ws'] else '❌'}",
-        f"Funding: {'✅' if checks['funding'] else '❌'}",
-        f"OI: {'✅' if checks['oi'] else '❌'}",
-        f"Trades: {'✅' if checks['trades'] else '❌'}",
-        f"Liq: {'✅' if checks['liq'] else '❌'}",
-        f"Price: {'✅' if checks['price'] else '❌'}",
-    ]
-
-    await message.reply("\n".join(lines))
-
-
 async def send_current_risk(chat_id):
     lines = []
-    for symbol, (score, direction, *_rest) in cache.items():
+    for symbol, (score, direction, _) in cache.items():
         lines.append(f"{symbol}: {score} ({direction or 'NEUTRAL'})")
     await bot.send_message(chat_id, "\n".join(lines))
 

@@ -23,6 +23,12 @@ last_funding = {}
 prev_funding = {}
 last_funding_ts = {}
 
+# diagnostic cooldowns
+diag_cooldowns = {
+    "oi": {},
+    "liq": {}
+}
+
 ws_task = None
 ws_running = False
 
@@ -154,6 +160,35 @@ async def global_risk_loop():
 
                 cache[symbol] = (score, direction, reasons)
 
+                # ---------------- DIAGNOSTIC PINGS ----------------
+
+                # 👀 OI ACTIVITY
+                if len(oi_vals) >= 2 and oi_vals[0][1] > 0:
+                    oi_change_pct = abs(oi_vals[-1][1] - oi_vals[0][1]) / oi_vals[0][1]
+                    last_ping = diag_cooldowns["oi"].get(symbol, 0)
+
+                    if oi_change_pct >= 0.015 and now - last_ping > 1200:
+                        diag_cooldowns["oi"][symbol] = now
+                        for chat_id in active_chats:
+                            await bot.send_message(
+                                chat_id,
+                                f"👀 OI activity detected: {symbol} ({WINDOW_SECONDS // 60}m)"
+                            )
+
+                # 👀 LIQUIDATIONS ACTIVITY
+                liq_threshold = LIQ_THRESHOLDS.get(symbol, 0)
+                last_ping = diag_cooldowns["liq"].get(symbol, 0)
+
+                if liq_threshold > 0 and liq >= liq_threshold * 0.7 and now - last_ping > 1800:
+                    diag_cooldowns["liq"][symbol] = now
+                    for chat_id in active_chats:
+                        await bot.send_message(
+                            chat_id,
+                            f"👀 Liquidations activity: {symbol}"
+                        )
+
+                # ---------------- RISK ALERTS ----------------
+
                 quality = meta.stream_quality(symbol)
                 if quality["level"] == "LOW":
                     continue
@@ -178,7 +213,6 @@ async def global_risk_loop():
 
                 for chat_id in active_chats:
 
-                    # HARD
                     if score >= HARD_ALERT_LEVEL and direction and confidence >= 3:
                         await bot.send_message(
                             chat_id,
@@ -189,7 +223,6 @@ async def global_risk_loop():
                         )
                         continue
 
-                    # BUILDUP
                     if score >= EARLY_ALERT_LEVEL:
                         text = (
                             f"⚠️ RISK BUILDUP {symbol}\n\n"
@@ -233,7 +266,6 @@ async def risk_cmd(message: types.Message):
     score, direction, reasons = cache[symbol]
     snapshot = build_market_snapshot(symbol)
 
-    # DEBUG
     if len(parts) >= 3 and parts[2].lower() == "debug":
         f = ws.funding.get(symbol)
         quality = meta.stream_quality(symbol)
@@ -254,7 +286,6 @@ async def risk_cmd(message: types.Message):
         )
         return
 
-    # FULL
     if len(parts) >= 3 and parts[2].lower() == "full":
         liq = ws.liquidations.get(symbol, 0)
         state = meta.detect_state(score, False, False, liq)
@@ -292,7 +323,6 @@ async def risk_cmd(message: types.Message):
         await message.reply(text)
         return
 
-    # SIMPLE
     await message.reply(
         f"{symbol}\n"
         f"Risk: {score}/10 ({direction or 'NEUTRAL'})\n"

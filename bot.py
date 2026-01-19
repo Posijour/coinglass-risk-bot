@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 import ws_binance as ws
 import risk
@@ -31,6 +32,12 @@ diag_cooldowns = {
 
 ws_task = None
 ws_running = False
+
+
+# ---------------- KEYBOARD ----------------
+
+main_kb = ReplyKeyboardMarkup(resize_keyboard=True)
+main_kb.add(KeyboardButton("📋 Команды"))
 
 
 # ---------------- WS SAFE START ----------------
@@ -160,13 +167,11 @@ async def global_risk_loop():
 
                 cache[symbol] = (score, direction, reasons)
 
-                # ---------------- DIAGNOSTIC PINGS ----------------
+                # -------- DIAGNOSTIC PINGS --------
 
-                # 👀 OI ACTIVITY
                 if len(oi_vals) >= 2 and oi_vals[0][1] > 0:
                     oi_change_pct = abs(oi_vals[-1][1] - oi_vals[0][1]) / oi_vals[0][1]
                     last_ping = diag_cooldowns["oi"].get(symbol, 0)
-
                     if oi_change_pct >= 0.015 and now - last_ping > 1200:
                         diag_cooldowns["oi"][symbol] = now
                         for chat_id in active_chats:
@@ -175,10 +180,8 @@ async def global_risk_loop():
                                 f"👀 OI activity detected: {symbol} ({WINDOW_SECONDS // 60}m)"
                             )
 
-                # 👀 LIQUIDATIONS ACTIVITY
                 liq_threshold = LIQ_THRESHOLDS.get(symbol, 0)
                 last_ping = diag_cooldowns["liq"].get(symbol, 0)
-
                 if liq_threshold > 0 and liq >= liq_threshold * 0.7 and now - last_ping > 1800:
                     diag_cooldowns["liq"][symbol] = now
                     for chat_id in active_chats:
@@ -187,7 +190,7 @@ async def global_risk_loop():
                             f"👀 Liquidations activity: {symbol}"
                         )
 
-                # ---------------- RISK ALERTS ----------------
+                # -------- RISK ALERTS --------
 
                 quality = meta.stream_quality(symbol)
                 if quality["level"] == "LOW":
@@ -212,7 +215,6 @@ async def global_risk_loop():
                 conf_level = meta.confidence_level(confidence)
 
                 for chat_id in active_chats:
-
                     if score >= HARD_ALERT_LEVEL and direction and confidence >= 3:
                         await bot.send_message(
                             chat_id,
@@ -229,12 +231,10 @@ async def global_risk_loop():
                             f"Risk: {score}\n"
                             f"Direction: {direction}"
                         )
-
                         if conf_level in ("MEDIUM", "HIGH"):
                             text += f"\nConfidence: {conf_level}"
                             if reasons:
                                 text += f"\nReason: {reasons[0]}"
-
                         await bot.send_message(chat_id, text)
 
             except Exception as e:
@@ -247,6 +247,39 @@ async def global_risk_loop():
 
 def ensure_chat(chat_id):
     active_chats.add(chat_id)
+
+
+@dp.message_handler(commands=["start"])
+async def start_cmd(message: types.Message):
+    ensure_chat(message.chat.id)
+    await message.reply(
+        "Привет. Я бот оценки рыночного риска.\n\n"
+        "Нажми «📋 Команды», чтобы посмотреть, что я умею.",
+        reply_markup=main_kb
+    )
+
+
+@dp.message_handler(commands=["commands", "help"])
+async def commands_cmd(message: types.Message):
+    await message.reply(
+        "📋 Доступные команды:\n\n"
+        "/risk\n"
+        "— краткий обзор риска по всем символам\n\n"
+        "/risk BTCUSDT\n"
+        "— текущий рыночный срез по инструменту\n\n"
+        "/risk BTCUSDT full\n"
+        "— полный риск-контекст (state, confidence, divergence)\n\n"
+        "/risk BTCUSDT debug\n"
+        "— техническая диагностика (dev)\n\n"
+        "/quality BTCUSDT\n"
+        "— качество потоков данных",
+        reply_markup=main_kb
+    )
+
+
+@dp.message_handler(lambda m: m.text == "📋 Команды")
+async def commands_button(message: types.Message):
+    await commands_cmd(message)
 
 
 @dp.message_handler(commands=["risk"])
@@ -361,3 +394,4 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+

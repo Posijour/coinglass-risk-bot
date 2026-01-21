@@ -244,7 +244,7 @@ async def start_cmd(message: types.Message):
     )
 
 
-@dp.message_handler(commands=["commands", "help"])
+@dp.message_handler(commands=["commands"])
 async def commands_cmd(message: types.Message):
     await message.reply(
         "📋 Команды:\n\n"
@@ -252,6 +252,25 @@ async def commands_cmd(message: types.Message):
         "/risk BTC\n"
         "/risk BTC full\n"
         "/risk BTC debug"
+    )
+
+
+@dp.message_handler(commands=["help"])
+async def help_cmd(message: types.Message):
+    await message.reply(
+        "ℹ️ О боте\n\n"
+        "Этот бот отслеживает РЫНОЧНЫЙ РИСК, а не даёт торговые сигналы.\n"
+        "Он пишет только тогда, когда рынок становится уязвимым.\n\n"
+        "📊 Метрики:\n"
+        "Risk (0–10) — уровень рыночного напряжения\n"
+        "Direction — направление риска (LONG / SHORT)\n"
+        "Confidence — надёжность оценки (LOW / MEDIUM / HIGH)\n"
+        "State — CALM / BUILDUP / UNWIND\n"
+        "Pressure — соотношение объёмов покупателей и продавцов\n"
+        "Liquidations — принудительные закрытия позиций\n\n"
+        "📌 Важно:\n"
+        "Если бот молчит — это нормально.\n"
+        "Тишина означает отсутствие структурного риска."
     )
 
 
@@ -329,3 +348,4 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+

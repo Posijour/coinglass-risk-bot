@@ -1,3 +1,4 @@
+
 import asyncio
 import time
 import threading
@@ -36,7 +37,7 @@ ws_running = False
 # ---------------- KEYBOARD ----------------
 
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True)
-main_kb.add(KeyboardButton("📋 Команды"))
+main_kb.add(KeyboardButton("/commands"))
 
 
 # ---------------- SYMBOL HELPERS ----------------
@@ -97,11 +98,10 @@ async def ws_watchdog():
                     await ws_task
                 except asyncio.CancelledError:
                     pass
-
             ws_task = asyncio.create_task(start_ws_safe())
 
 
-# ---------------- SNAPSHOT (NO FUNDING) ----------------
+# ---------------- SNAPSHOT ----------------
 
 def build_market_snapshot(symbol):
     oi_vals = ws.oi_window.get(symbol, [])
@@ -140,13 +140,15 @@ async def global_risk_loop():
     while True:
         for symbol in SYMBOLS:
             try:
+                now = time.time()
+
                 f = ws.funding.get(symbol)
                 pf = last_funding.get(symbol)
 
                 if f is not None:
                     prev_funding[symbol] = pf
                     last_funding[symbol] = f
-                    last_funding_ts[symbol] = time.time()
+                    last_funding_ts[symbol] = now
 
                 oi_vals = ws.oi_window.get(symbol, [])
                 liq = ws.liquidations.get(symbol, 0)
@@ -171,6 +173,55 @@ async def global_risk_loop():
 
                 cache[symbol] = (score, direction, reasons)
 
+                # -------- DIAGNOSTIC PINGS --------
+
+                if len(oi_vals) >= 2 and oi_vals[0][1] > 0:
+                    oi_change = abs(oi_vals[-1][1] - oi_vals[0][1]) / oi_vals[0][1]
+                    last = diag_cooldowns["oi"].get(symbol, 0)
+                    if oi_change >= 0.015 and now - last > 1200:
+                        diag_cooldowns["oi"][symbol] = now
+                        for chat in active_chats:
+                            await bot.send_message(chat, f"👀 OI activity detected: {symbol}")
+
+                last = diag_cooldowns["liq"].get(symbol, 0)
+                if liq >= LIQ_THRESHOLDS.get(symbol, 0) * 0.7 and now - last > 1800:
+                    diag_cooldowns["liq"][symbol] = now
+                    for chat in active_chats:
+                        await bot.send_message(chat, f"👀 Liquidations activity: {symbol}")
+
+                # -------- RISK ALERTS --------
+
+                quality = meta.stream_quality(symbol)
+                if quality["level"] == "LOW":
+                    continue
+
+                confidence = meta.calculate_confidence(
+                    score, direction, oi_spike, funding_spike, liq, price, liq_sides
+                )
+
+                if funding_spike:
+                    confidence += 1
+                if oi_spike:
+                    confidence += 1
+                confidence = min(confidence, 5)
+
+                conf_level = meta.confidence_level(confidence)
+
+                for chat in active_chats:
+                    if score >= HARD_ALERT_LEVEL and direction and confidence >= 3:
+                        await bot.send_message(
+                            chat,
+                            f"🚨 HARD RISK ALERT {symbol}\n\n"
+                            f"Risk: {score}\nDirection: {direction}\nConfidence: {conf_level}"
+                        )
+                        continue
+
+                    if score >= EARLY_ALERT_LEVEL:
+                        text = f"⚠️ RISK BUILDUP {symbol}\n\nRisk: {score}\nDirection: {direction}"
+                        if conf_level in ("MEDIUM", "HIGH") and reasons:
+                            text += f"\nConfidence: {conf_level}\nReason: {reasons[0]}"
+                        await bot.send_message(chat, text)
+
             except Exception as e:
                 print("RISK LOOP ERROR:", e, flush=True)
 
@@ -181,6 +232,27 @@ async def global_risk_loop():
 
 def ensure_chat(chat_id):
     active_chats.add(chat_id)
+
+
+@dp.message_handler(commands=["start"])
+async def start_cmd(message: types.Message):
+    ensure_chat(message.chat.id)
+    await message.reply(
+        "Привет. Я бот оценки рыночного риска.\n\n"
+        "Нажми /commands, чтобы увидеть доступные команды.",
+        reply_markup=main_kb
+    )
+
+
+@dp.message_handler(commands=["commands", "help"])
+async def commands_cmd(message: types.Message):
+    await message.reply(
+        "📋 Команды:\n\n"
+        "/risk\n"
+        "/risk BTC\n"
+        "/risk BTC full\n"
+        "/risk BTC debug"
+    )
 
 
 @dp.message_handler(commands=["risk"])
@@ -202,43 +274,28 @@ async def risk_cmd(message: types.Message):
     disp = display_symbol(symbol)
     f = ws.funding.get(symbol)
 
-    # DEBUG
     if len(parts) >= 3 and parts[2].lower() == "debug":
-        await message.reply(
-            f"DEBUG {disp}\n\n"
-            f"risk: {score}\n"
-            f"direction: {direction}\n"
-            f"funding_raw: {f}"
-        )
+        await message.reply(f"DEBUG {disp}\nfunding_raw: {f}\nrisk: {score}")
         return
 
-    # FULL
     if len(parts) >= 3 and parts[2].lower() == "full":
         text = (
-            f"{disp}\n"
-            f"Risk: {score}/10 ({direction or 'NEUTRAL'})\n"
-            f"Funding: {percent_funding(f)}\n\n"
-            + snap
+            f"{disp}\nRisk: {score}/10 ({direction or 'NEUTRAL'})\n"
+            f"Funding: {percent_funding(f)}\n\n{snap}"
         )
         if reasons:
             text += "\n\nReasons:\n" + "\n".join(f"- {r}" for r in reasons)
         await message.reply(text)
         return
 
-    # SIMPLE
     await message.reply(
-        f"{disp}\n"
-        f"Risk: {score}/10 ({direction or 'NEUTRAL'})\n"
-        f"Funding: {qualitative_funding(f)}\n\n"
-        + snap
+        f"{disp}\nRisk: {score}/10 ({direction or 'NEUTRAL'})\n"
+        f"Funding: {qualitative_funding(f)}\n\n{snap}"
     )
 
 
 async def send_current_risk(chat_id):
-    lines = [
-        f"{display_symbol(s)}: {v[0]} ({v[1] or 'NEUTRAL'})"
-        for s, v in cache.items()
-    ]
+    lines = [f"{display_symbol(s)}: {v[0]} ({v[1] or 'NEUTRAL'})" for s, v in cache.items()]
     await bot.send_message(chat_id, "\n".join(lines))
 
 
@@ -272,4 +329,3 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
-

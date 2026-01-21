@@ -1,4 +1,3 @@
-
 import asyncio
 import time
 import threading
@@ -37,7 +36,7 @@ ws_running = False
 # ---------------- KEYBOARD ----------------
 
 main_kb = ReplyKeyboardMarkup(resize_keyboard=True)
-main_kb.add(KeyboardButton("/commands"))
+main_kb.add(KeyboardButton("📋 Команды"))
 
 
 # ---------------- SYMBOL HELPERS ----------------
@@ -173,55 +172,6 @@ async def global_risk_loop():
 
                 cache[symbol] = (score, direction, reasons)
 
-                # -------- DIAGNOSTIC PINGS --------
-
-                if len(oi_vals) >= 2 and oi_vals[0][1] > 0:
-                    oi_change = abs(oi_vals[-1][1] - oi_vals[0][1]) / oi_vals[0][1]
-                    last = diag_cooldowns["oi"].get(symbol, 0)
-                    if oi_change >= 0.015 and now - last > 1200:
-                        diag_cooldowns["oi"][symbol] = now
-                        for chat in active_chats:
-                            await bot.send_message(chat, f"👀 OI activity detected: {symbol}")
-
-                last = diag_cooldowns["liq"].get(symbol, 0)
-                if liq >= LIQ_THRESHOLDS.get(symbol, 0) * 0.7 and now - last > 1800:
-                    diag_cooldowns["liq"][symbol] = now
-                    for chat in active_chats:
-                        await bot.send_message(chat, f"👀 Liquidations activity: {symbol}")
-
-                # -------- RISK ALERTS --------
-
-                quality = meta.stream_quality(symbol)
-                if quality["level"] == "LOW":
-                    continue
-
-                confidence = meta.calculate_confidence(
-                    score, direction, oi_spike, funding_spike, liq, price, liq_sides
-                )
-
-                if funding_spike:
-                    confidence += 1
-                if oi_spike:
-                    confidence += 1
-                confidence = min(confidence, 5)
-
-                conf_level = meta.confidence_level(confidence)
-
-                for chat in active_chats:
-                    if score >= HARD_ALERT_LEVEL and direction and confidence >= 3:
-                        await bot.send_message(
-                            chat,
-                            f"🚨 HARD RISK ALERT {symbol}\n\n"
-                            f"Risk: {score}\nDirection: {direction}\nConfidence: {conf_level}"
-                        )
-                        continue
-
-                    if score >= EARLY_ALERT_LEVEL:
-                        text = f"⚠️ RISK BUILDUP {symbol}\n\nRisk: {score}\nDirection: {direction}"
-                        if conf_level in ("MEDIUM", "HIGH") and reasons:
-                            text += f"\nConfidence: {conf_level}\nReason: {reasons[0]}"
-                        await bot.send_message(chat, text)
-
             except Exception as e:
                 print("RISK LOOP ERROR:", e, flush=True)
 
@@ -239,7 +189,7 @@ async def start_cmd(message: types.Message):
     ensure_chat(message.chat.id)
     await message.reply(
         "Привет. Я бот оценки рыночного риска.\n\n"
-        "Нажми /commands, чтобы увидеть доступные команды.",
+        "Нажми «📋 Команды», чтобы посмотреть, что я умею.",
         reply_markup=main_kb
     )
 
@@ -248,10 +198,11 @@ async def start_cmd(message: types.Message):
 async def commands_cmd(message: types.Message):
     await message.reply(
         "📋 Команды:\n\n"
-        "/risk\n"
-        "/risk BTC\n"
-        "/risk BTC full\n"
-        "/risk BTC debug"
+        "/risk — обзор риска по всем инструментам\n"
+        "/risk BTC — текущий рыночный срез\n"
+        "/risk BTC full — расширенный контекст\n"
+        "/risk BTC debug — технические данные\n\n"
+        "/help — как читать данные"
     )
 
 
@@ -259,19 +210,21 @@ async def commands_cmd(message: types.Message):
 async def help_cmd(message: types.Message):
     await message.reply(
         "ℹ️ О боте\n\n"
-        "Этот бот отслеживает РЫНОЧНЫЙ РИСК, а не даёт торговые сигналы.\n"
-        "Он пишет только тогда, когда рынок становится уязвимым.\n\n"
-        "📊 Метрики:\n"
-        "Risk (0–10) — уровень рыночного напряжения\n"
-        "Direction — направление риска (LONG / SHORT)\n"
-        "Confidence — надёжность оценки (LOW / MEDIUM / HIGH)\n"
-        "State — CALM / BUILDUP / UNWIND\n"
-        "Pressure — соотношение объёмов покупателей и продавцов\n"
-        "Liquidations — принудительные закрытия позиций\n\n"
-        "📌 Важно:\n"
-        "Если бот молчит — это нормально.\n"
-        "Тишина означает отсутствие структурного риска."
+        "Бот отслеживает рыночный РИСК, а не торговые сигналы.\n"
+        "Если бот молчит — рынок стабилен.\n\n"
+        "Метрики:\n"
+        "Risk — уровень напряжения (0–10)\n"
+        "Direction — куда уязвим рынок\n"
+        "Confidence — надёжность оценки\n"
+        "Pressure — соотношение объёмов\n"
+        "Liquidations — принудительные закрытия"
     )
+
+
+# 👉 handler для кнопки 📋 Команды
+@dp.message_handler(lambda m: m.text and "Команды" in m.text)
+async def commands_button(message: types.Message):
+    await commands_cmd(message)
 
 
 @dp.message_handler(commands=["risk"])
@@ -294,7 +247,7 @@ async def risk_cmd(message: types.Message):
     f = ws.funding.get(symbol)
 
     if len(parts) >= 3 and parts[2].lower() == "debug":
-        await message.reply(f"DEBUG {disp}\nfunding_raw: {f}\nrisk: {score}")
+        await message.reply(f"DEBUG {disp}\nrisk: {score}\nfunding_raw: {f}")
         return
 
     if len(parts) >= 3 and parts[2].lower() == "full":
@@ -348,4 +301,3 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
-

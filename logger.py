@@ -1,3 +1,4 @@
+# logger.py
 import json
 import os
 import time
@@ -9,16 +10,17 @@ _LOG_FILE = "events.jsonl"
 _lock = Lock()
 
 
-def log_event(event: str, payload: dict):
+def log_event(event_type: str, payload: dict):
     """
     Универсальный логгер событий бота.
-    - В проде (Render): пишет в stdout (через print)
-    - Локально (LOG_TO_FILE=true): пишет в events.jsonl
+    - Render / prod: stdout (JSONL)
+    - Local (LOG_TO_FILE=true): events.jsonl
     """
+
     record = {
         "ts": int(time.time()),
-        "event": event,
-        **payload,
+        "type": event_type,
+        "data": payload,   # 👈 важный момент
     }
 
     line = json.dumps(record, ensure_ascii=False)

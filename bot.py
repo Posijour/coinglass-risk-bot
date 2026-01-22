@@ -173,7 +173,52 @@ async def global_risk_loop():
                 )
 
                 cache[symbol] = (score, direction, reasons)
+                
+                # -------- RISK ALERTS --------
+                quality = meta.stream_quality(symbol)
+                if quality["level"] == "LOW":
+                    continue
+                
+                confidence = meta.calculate_confidence(
+                    score,
+                    direction,
+                    oi_spike,
+                    funding_spike,
+                    liq,
+                    price,
+                    liq_sides
+                )
+                
+                if funding_spike:
+                    confidence += 1
+                if oi_spike:
+                    confidence += 1
+                confidence = min(confidence, 5)
+                
+                conf_level = meta.confidence_level(confidence)
+                
+                for chat in active_chats:
+                    if score >= HARD_ALERT_LEVEL and direction and confidence >= 3:
+                        await bot.send_message(
+                            chat,
+                            f"🚨 HARD RISK ALERT {symbol}\n\n"
+                            f"Risk: {score}\n"
+                            f"Direction: {direction}\n"
+                            f"Confidence: {conf_level}"
+                        )
+                        continue
+                
+                    if score >= EARLY_ALERT_LEVEL:
+                        text = (
+                            f"⚠️ RISK BUILDUP {symbol}\n\n"
+                            f"Risk: {score}\n"
+                            f"Direction: {direction}"
+                        )
+                        if conf_level in ("MEDIUM", "HIGH") and reasons:
+                            text += f"\nConfidence: {conf_level}\nReason: {reasons[0]}"
+                        await bot.send_message(chat, text)
 
+                
                 # ---------- LOG: расчет риска ----------
                 log_event("risk_eval", {
                     "ts": int(now),
@@ -324,4 +369,5 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 

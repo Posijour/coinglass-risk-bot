@@ -13,6 +13,8 @@ import meta
 import divergence
 from config import *
 
+from logger import log_event   # ← ДОБАВЛЕНО
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
@@ -172,6 +174,18 @@ async def global_risk_loop():
 
                 cache[symbol] = (score, direction, reasons)
 
+                # ---------- LOG: расчет риска ----------
+                log_event("risk_eval", {
+                    "ts": int(now),
+                    "symbol": symbol,
+                    "risk": score,
+                    "direction": direction,
+                    "funding": f,
+                    "oi_spike": oi_spike,
+                    "funding_spike": funding_spike,
+                    "liq": liq,
+                })
+
             except Exception as e:
                 print("RISK LOOP ERROR:", e, flush=True)
 
@@ -221,7 +235,6 @@ async def help_cmd(message: types.Message):
     )
 
 
-# 👉 handler для кнопки 📋 Команды
 @dp.message_handler(lambda m: m.text and "Команды" in m.text)
 async def commands_button(message: types.Message):
     await commands_cmd(message)
@@ -230,6 +243,13 @@ async def commands_button(message: types.Message):
 @dp.message_handler(commands=["risk"])
 async def risk_cmd(message: types.Message):
     ensure_chat(message.chat.id)
+
+    log_event("cmd_risk", {
+        "ts": int(time.time()),
+        "chat_id": message.chat.id,
+        "text": message.text,
+    })
+
     parts = message.text.strip().split()
 
     if len(parts) == 1:
@@ -267,7 +287,10 @@ async def risk_cmd(message: types.Message):
 
 
 async def send_current_risk(chat_id):
-    lines = [f"{display_symbol(s)}: {v[0]} ({v[1] or 'NEUTRAL'})" for s, v in cache.items()]
+    lines = [
+        f"{display_symbol(s)}: {v[0]} ({v[1] or 'NEUTRAL'})"
+        for s, v in cache.items()
+    ]
     await bot.send_message(chat_id, "\n".join(lines))
 
 

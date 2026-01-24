@@ -240,14 +240,38 @@ async def global_risk_loop():
                         })
                 
                         continue
-                    now_ts = int(time.time())
-                    alert_history[symbol].append(now_ts)
+                    if score >= EARLY_ALERT_LEVEL:
+                        now_ts = int(time.time())
                     
-                    cutoff = now_ts - ALERT_WINDOW_HOURS * 3600
-                    while alert_history[symbol] and alert_history[symbol][0] < cutoff:
-                        alert_history[symbol].popleft()
+                        alert_history[symbol].append(now_ts)
                     
-                    symbol_alerts_count = len(alert_history[symbol])
+                        cutoff = now_ts - ALERT_WINDOW_HOURS * 3600
+                        while alert_history[symbol] and alert_history[symbol][0] < cutoff:
+                            alert_history[symbol].popleft()
+                    
+                        symbol_alerts_count = len(alert_history[symbol])
+                    
+                        text = (
+                            f"⚠️ RISK BUILDUP {symbol}\n\n"
+                            f"Risk: {score}\n"
+                            f"Direction: {direction}\n"
+                            f"Alerts last {ALERT_WINDOW_HOURS}h: {symbol_alerts_count}"
+                        )
+                    
+                        if conf_level in ("MEDIUM", "HIGH") and reasons:
+                            text += f"\nConfidence: {conf_level}\nReason: {reasons[0]}"
+                    
+                        await bot.send_message(chat, text)
+                    
+                        log_event("alert_sent", {
+                            "ts": now_ts,
+                            "symbol": symbol,
+                            "risk": score,
+                            "direction": direction,
+                            "confidence": confidence,
+                            "type": "BUILDUP",
+                            "chat_id": chat,
+                        })
 
                     if score >= EARLY_ALERT_LEVEL:
                         text = (
@@ -416,6 +440,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

@@ -13,6 +13,11 @@ import meta
 import divergence
 from config import *
 
+from collections import defaultdict, deque
+
+ALERT_WINDOW_HOURS = 3  # ← можешь менять
+alert_history = defaultdict(deque)
+
 from logger import log_event   # ← ДОБАВЛЕНО
 
 bot = Bot(token=BOT_TOKEN)
@@ -118,11 +123,11 @@ def build_market_snapshot(symbol):
     liq = ws.liquidations.get(symbol, 0)
     liq_txt = f"{liq / 1_000_000:.1f}M" if liq > 0 else "none detected"
 
-    prev = prev_scores.get(symbol)
+    prev = prev_s.get(symbol)
     trend = "flat"
     if prev is not None:
-        score = cache[symbol][0]
-        trend = "rising" if score > prev else "falling" if score < prev else "flat"
+         = cache[symbol][0]
+        trend = "rising" if  > prev else "falling" if score < prev else "flat"
     prev_scores[symbol] = cache[symbol][0]
 
     return (
@@ -230,7 +235,15 @@ async def global_risk_loop():
                         })
                 
                         continue
-                
+                    now_ts = int(time.time())
+                    alert_history[symbol].append(now_ts)
+                    
+                    cutoff = now_ts - ALERT_WINDOW_HOURS * 3600
+                    while alert_history[symbol] and alert_history[symbol][0] < cutoff:
+                        alert_history[symbol].popleft()
+                    
+                    alerts_count = len(alert_history[symbol])
+
                     if score >= EARLY_ALERT_LEVEL:
                         text = (
                             f"⚠️ RISK BUILDUP {symbol}\n\n"
@@ -239,7 +252,8 @@ async def global_risk_loop():
                         )
                         if conf_level in ("MEDIUM", "HIGH") and reasons:
                             text += f"\nConfidence: {conf_level}\nReason: {reasons[0]}"
-                
+                        text += f"\nAlerts last {ALERT_WINDOW_HOURS}h: {alerts_count}"
+
                         await bot.send_message(chat, text)
                 
                         log_event("alert_sent", {
@@ -390,3 +404,4 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+

@@ -274,7 +274,11 @@ async def global_risk_loop():
                         "type": "BUILDUP",
                         "chat_id": "broadcast",
                     })
+                    
+            except Exception as e:
+                print("RISK LOOP ERROR:", e, flush=True)
 
+        await asyncio.sleep(INTERVAL_SECONDS)
 
 # ---------------- COMMANDS ----------------
 
@@ -415,6 +419,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

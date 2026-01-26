@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.utils.exceptions import BotBlocked
 
 import ws_binance as ws
 import risk
@@ -229,9 +230,12 @@ async def global_risk_loop():
                         f"Confidence: {conf_level}"
                     )
                 
-                    for chat in active_chats:
-                        await bot.send_message(chat, text)
-                
+                    for chat in active_chats.copy():
+                        try:
+                            await bot.send_message(chat, text)
+                        except BotBlocked:
+                            active_chats.discard(chat)
+
                     log_event("alert_sent", {
                         "ts": now_ts,
                         "symbol": symbol,
@@ -262,8 +266,12 @@ async def global_risk_loop():
                     if conf_level in ("MEDIUM", "HIGH") and reasons:
                         text += f"\nConfidence: {conf_level}\nReason: {reasons[0]}"
                 
-                    for chat in active_chats:
-                        await bot.send_message(chat, text)
+                    for chat in active_chats.copy():
+                        try:
+                            await bot.send_message(chat, text)
+                        except BotBlocked:
+                            active_chats.discard(chat)
+
                 
                     log_event("alert_sent", {
                         "ts": now_ts,
@@ -419,6 +427,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

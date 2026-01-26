@@ -15,11 +15,16 @@ import divergence
 from config import *
 
 from collections import defaultdict, deque
+from logger import log_event
 
 ALERT_WINDOW_HOURS = 3  # ← можешь менять
 alert_history = defaultdict(deque)
 
-from logger import log_event   # ← ДОБАВЛЕНО
+# ---------------- MARKET REGIME ----------------
+
+MARKET_REGIME_INTERVAL = 900  # 15 минут
+last_regime_ts = 0
+current_market_regime = "UNKNOWN"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
@@ -144,12 +149,72 @@ def build_market_snapshot(symbol):
         f"Liq: {liq_txt}"
     )
 
+def build_market_state():
+    risks = []
+    directions = []
+    buildups = 0
+
+    for symbol, data in cache.items():
+        score, direction, _ = data
+        if score is not None:
+            risks.append(score)
+        if direction:
+            directions.append(direction)
+
+    for symbol, q in alert_history.items():
+        buildups += len(q)
+
+    avg_risk = sum(risks) / len(risks) if risks else 0
+
+    long_bias = directions.count("LONG")
+    short_bias = directions.count("SHORT")
+
+    return {
+        "avg_risk": round(avg_risk, 2),
+        "buildup_count": buildups,
+        "long_bias": long_bias,
+        "short_bias": short_bias,
+        "symbols": len(cache),
+    }
+
+def detect_market_regime(state):
+    if state["avg_risk"] < 1 and state["buildup_count"] < 5:
+        return "CALM"
+
+    if state["buildup_count"] >= 5 and state["avg_risk"] < 2:
+        return "CROWD_IMBALANCE"
+
+    if state["avg_risk"] >= 2:
+        return "STRESS"
+
+    return "UNDEFINED"
+
+
 # ---------------- GLOBAL RISK LOOP ----------------
 
 async def global_risk_loop():
     await asyncio.sleep(10)
 
     while True:
+             global last_regime_ts, current_market_regime
+
+            now_ts = int(time.time())
+    
+            if now_ts - last_regime_ts >= MARKET_REGIME_INTERVAL:
+                state = build_market_state()
+                regime = detect_market_regime(state)
+    
+                if regime != current_market_regime:
+                    current_market_regime = regime
+    
+                    log_event("market_regime", {
+                        "ts": now_ts,
+                        "regime": regime,
+                        **state,
+                    })
+    
+                last_regime_ts = now_ts
+
         for symbol in SYMBOLS:
             try:
                 now = time.time()
@@ -371,6 +436,7 @@ async def risk_cmd(message: types.Message):
     
         text = (
             f"{disp}\n"
+            f"Market regime: {current_market_regime}\n"
             f"Risk: {score}/10 ({direction or 'NEUTRAL'})\n"
             f"Funding: {percent_funding(f)}\n\n"
             f"Alerts last {ALERT_WINDOW_HOURS}h: {alerts_last}\n\n"
@@ -427,6 +493,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

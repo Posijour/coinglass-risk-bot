@@ -372,6 +372,34 @@ async def global_risk_loop():
 def ensure_chat(chat_id):
     active_chats.add(chat_id)
 
+@dp.message_handler(commands=["about"])
+async def about_cmd(message: types.Message):
+    await message.reply(
+        "This bot monitors crypto market risk and crowd behavior in real time.\n\n"
+        "It tracks:\n"
+        "• Risk buildup\n"
+        "• Crowd imbalance (long/short pressure)\n"
+        "• Market stress regimes\n\n"
+        "Important:\n"
+        "• This is NOT a trading signal bot\n"
+        "• It does NOT predict price\n"
+        "• It provides context, not advice\n\n"
+        "If the bot is silent — the market is calm.\n"
+        "If alerts appear — something is changing.\n\n"
+        "Experimental system."
+    )
+
+@dp.message_handler(commands=["philosophy"])
+async def about_cmd(message: types.Message):
+    await message.reply(
+        "Markets move because of people, not indicators.\n\n"
+        "  \n"
+        "This bot does not chase price.\n"
+        "It observes stress, imbalance and crowd behavior.\n\n"
+        "  \n"
+        "Risk appears before direction.\n"
+        "Silence is a signal."
+    )
 
 @dp.message_handler(commands=["start"])
 async def start_cmd(message: types.Message):
@@ -533,5 +561,6 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 

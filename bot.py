@@ -405,8 +405,8 @@ async def about_cmd(message: types.Message):
 async def start_cmd(message: types.Message):
     ensure_chat(message.chat.id)
     await message.reply(
-        "Привет. Я бот оценки рыночного риска.\n\n"
-        "Нажми «📋 Команды», чтобы посмотреть, что я умею.",
+        "Hi. I am a crypto market risk monitoring bot.\n\n"
+        "Tap “📋 Commands” to see what I can do.",
         reply_markup=main_kb
     )
 
@@ -414,32 +414,33 @@ async def start_cmd(message: types.Message):
 @dp.message_handler(commands=["commands"])
 async def commands_cmd(message: types.Message):
     await message.reply(
-        "📋 Команды:\n\n"
-        "/risk — обзор риска по всем инструментам\n"
-        "/risk BTC — текущий рыночный срез\n"
-        "/risk BTC full — расширенный контекст\n"
-        "/risk BTC debug — технические данные\n\n"
-        "/regime — макро-состояние рынка\n"
-        "/help — как читать данные"
+        "📋 Commands:\n\n"
+        "/risk — risk overview across all tracked markets\n"
+        "/risk BTC — current market snapshot\n"
+        "/risk BTC full — extended market context\n"
+        "/risk BTC debug — technical details\n\n"
+        "/regime — macro market regime\n"
+        "/about — what this bot does\n"
+        "/help — how to read the data"
     )
 
 
 @dp.message_handler(commands=["help"])
 async def help_cmd(message: types.Message):
     await message.reply(
-        "ℹ️ О боте\n\n"
-        "Бот отслеживает рыночный РИСК, а не торговые сигналы.\n"
-        "Если бот молчит — рынок стабилен.\n\n"
-        "Метрики:\n"
-        "Risk — уровень напряжения (0–10)\n"
-        "Direction — куда уязвим рынок\n"
-        "Confidence — надёжность оценки\n"
-        "Pressure — соотношение объёмов\n"
-        "Liquidations — принудительные закрытия"
+        "ℹ️ About this bot\n\n"
+        "This bot tracks market RISK, not trading signals.\n"
+        "If the bot is silent — the market is calm.\n\n"
+        "Metrics:\n"
+        "Risk — market stress level (0–10)\n"
+        "Direction — where the market is vulnerable\n"
+        "Confidence — reliability of the assessment\n"
+        "Pressure — long/short imbalance\n"
+        "Liquidations — forced position closures"
     )
 
 
-@dp.message_handler(lambda m: m.text and "Команды" in m.text)
+@dp.message_handler(lambda m: m.text and "Commands" in m.text)
 async def commands_button(message: types.Message):
     await commands_cmd(message)
 
@@ -504,21 +505,34 @@ async def regime_cmd(message: types.Message):
 
     text = (
         f"🌍 Market Regime: {regime}\n\n"
-        f"Avg risk: {state['avg_risk']}\n"
-        f"Buildups (3h): {state['buildup_count']}\n"
-        f"Bias: {state['bias']}\n"
-        f"Avg funding: {state['avg_funding']}\n"
+        f"Average risk: {state['avg_risk']}\n"
+        f"Risk buildups (last 3h): {state['buildup_count']}\n"
+        f"Long bias: {state['long_bias']}\n"
+        f"Short bias: {state['short_bias']}\n"
         f"Symbols tracked: {state['symbols']}\n\n"
+        f"Interpretation:\n"
     )
 
     if regime == "CALM":
-        text += "Interpretation:\nLow systemic stress.\nCrowd positioning balanced."
+        text += (
+            "Low systemic stress.\n"
+            "Crowd positioning is relatively balanced."
+        )
     elif regime == "CROWD_IMBALANCE":
-        text += "Interpretation:\nCrowded positioning detected.\nAsymmetric risk increasing."
+        text += (
+            "Crowded positioning detected.\n"
+            "Asymmetric risk is building."
+        )
     elif regime == "STRESS":
-        text += "Interpretation:\nMarket under stress.\nVolatility expansion likely."
+        text += (
+            "Elevated market stress.\n"
+            "Instability and volatility expansion possible."
+        )
     else:
-        text += "Interpretation:\nMarket state unclear."
+        text += (
+            "Market state is unclear.\n"
+            "Signals are mixed."
+        )
 
     await message.reply(text)
     
@@ -561,6 +575,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

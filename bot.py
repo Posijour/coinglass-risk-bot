@@ -378,17 +378,17 @@ async def about_cmd(message: types.Message):
         "Experimental system."
     )
 
+
 @dp.message_handler(commands=["philosophy"])
-async def about_cmd(message: types.Message):
+async def philosophy_cmd(message: types.Message):
     await message.reply(
         "Markets move because of people, not indicators.\n\n"
-        "  \n"
         "This bot does not chase price.\n"
         "It observes stress, imbalance and crowd behavior.\n\n"
-        "  \n"
         "Risk appears before direction.\n"
         "Silence is a signal."
     )
+
 
 @dp.message_handler(commands=["start"])
 async def start_cmd(message: types.Message):
@@ -512,6 +512,7 @@ async def risk_cmd(message: types.Message):
         f"Funding: {qualitative_funding(f)}\n\n{snap}"
     )
 
+
 @dp.message_handler(commands=["regime"])
 async def regime_cmd(message: types.Message):
     state = build_market_state()
@@ -530,29 +531,32 @@ async def regime_cmd(message: types.Message):
     if regime == "CALM":
         text += (
             "Interpretation:\n"
-            "Low systemic stress.\n"
-            "Crowd positioning is balanced.\n"
+            "Systemic stress is low.\n"
+            "Crowd positioning appears balanced.\n"
         )
     elif regime == "CROWD_IMBALANCE":
         text += (
             "Interpretation:\n"
-            "Crowded positioning dominates the market.\n"
-            "Asymmetric risk is building.\n"
+            "Crowded positioning dominates.\n"
+            "Asymmetric risk is building beneath the surface.\n"
         )
     elif regime == "STRESS":
         text += (
             "Interpretation:\n"
-            "Market is under systemic stress.\n"
-            "Volatility expansion possible.\n"
+            "Systemic stress is elevated.\n"
+            "Volatility expansion becomes more likely.\n"
         )
     else:
-        text += "Interpretation:\nMarket state unclear.\n"
+        text += (
+            "Interpretation:\n"
+            "Market conditions are mixed.\n"
+            "Signals lack clear alignment.\n"
+        )
 
-    text += "\nThis is a market risk log, not a forecast."
+    text += "\nThis is a market risk observation, not a forecast."
 
     await message.reply(text)
 
-    
 
 async def send_current_risk(chat_id):
     lines = [
@@ -592,6 +596,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

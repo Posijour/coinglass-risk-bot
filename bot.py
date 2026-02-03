@@ -563,11 +563,11 @@ async def regime_cmd(message: types.Message):
     await message.reply(text)
 
 
-async def send_current_risk(chat_id):␊
-    lines = [␊
+async def send_current_risk(chat_id):
+    lines = [
         f"{display_symbol(s)}: {v[0]} ({v[1] or 'NEUTRAL'})"
-        for s, v in cache.items()␊
-    ]␊
+        for s, v in cache.items()
+    ]
     await enqueue_message(chat_id, "\n".join(lines))
 
 
@@ -652,6 +652,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

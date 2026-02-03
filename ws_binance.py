@@ -1,5 +1,6 @@
 import asyncio
 import json
+import random
 import time
 import websockets
 from collections import deque
@@ -39,10 +40,12 @@ async def binance_ws():
         ]
 
     url = f"wss://fstream.binance.com/stream?streams={'/'.join(streams)}"
-
+    backoff = 1
+    max_backoff = 60
     while True:
         try:
             async with websockets.connect(url, ping_interval=20) as ws:
+                backoff = 1
                 async for raw in ws:
                     msg = json.loads(raw)
                     data = msg.get("data", {})
@@ -99,5 +102,6 @@ async def binance_ws():
                         touch(symbol)
 
         except Exception:
-            await asyncio.sleep(5)
-
+            jitter = random.uniform(0.3, 1.3)
+            await asyncio.sleep(backoff * jitter)
+            backoff = min(backoff * 2, max_backoff)

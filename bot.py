@@ -19,6 +19,8 @@ from logger import log_event
 
 ALERT_WINDOW_HOURS = 3  # ← можешь менять
 alert_history = defaultdict(deque)
+LAST_RISK_EVAL_TS = 0
+
 
 # ---------------- MARKET REGIME ----------------
 
@@ -156,7 +158,7 @@ def build_market_state():
     buildups = 0
 
     for symbol, data in cache.items():
-        score, direction, _ = data
+        score, direction = data[0], data[1]
         if score is not None:
             risks.append(score)
         if direction:
@@ -240,7 +242,7 @@ async def global_risk_loop():
                 price = getattr(ws, "mark_price", {}).get(symbol)
                 liq_sides = getattr(ws, "liq_sides", {}).get(symbol, {})
 
-                score, direction, reasons, funding_spike, oi_spike = risk.calculate_risk(
+                result = calculate_risk(
                     f,
                     pf,
                     pressure_ratio,
@@ -250,20 +252,23 @@ async def global_risk_loop():
                     price,
                     liq_sides
                 )
-
-                cache[symbol] = (score, direction, reasons)
+                score, direction, reasons, funding_spike, oi_spike, risk_driver = result
+                cache[symbol] = (score, direction, reasons, risk_driver)
 
                 log_event("risk_eval", {
                     "symbol": symbol,
                     "risk": score,
                     "direction": direction,
+                    "risk_driver": risk_driver,
                     "funding": f,
                     "oi_spike": oi_spike,
                     "funding_spike": funding_spike,
                     "liq": liq,
                 })
 
-                
+                global LAST_RISK_EVAL_TS
+                LAST_RISK_EVAL_TS = int(time.time())
+
                 # -------- RISK ALERTS --------
                 quality = meta.stream_quality(symbol)
                 if quality["level"] == "LOW":
@@ -312,6 +317,7 @@ async def global_risk_loop():
                         "confidence": confidence,
                         "type": "HARD",
                         "chat_id": "broadcast",
+                        "risk_driver": risk_driver,
                     })
                 
                 # ---------- BUILDUP ALERT ----------
@@ -349,6 +355,7 @@ async def global_risk_loop():
                         "confidence": confidence,
                         "type": "BUILDUP",
                         "chat_id": "broadcast",
+                        "risk_driver": risk_driver,
                     })
                     
             except Exception as e:
@@ -472,7 +479,7 @@ async def risk_cmd(message: types.Message):
         await message.reply("❌ Неизвестный символ")
         return
 
-    score, direction, reasons = cache[symbol]
+    score, direction, reasons, risk_driver = cache[symbol]
     snap = build_market_snapshot(symbol)
     disp = display_symbol(symbol)
     f = ws.funding.get(symbol)
@@ -487,6 +494,7 @@ async def risk_cmd(message: types.Message):
         text = (
             f"{disp}\n\n"
             f"Risk: {score}/10 ({direction or 'NEUTRAL'})\n"
+            f"Risk driver: {risk_driver}\n"
             f"Confidence: {meta.confidence_level(meta.calculate_confidence(score, direction, False, False, 0, None, {}))}\n\n"
     
             f"Market context:\n"
@@ -566,6 +574,30 @@ async def send_current_risk(chat_id):
     await bot.send_message(chat_id, "\n".join(lines))
 
 
+async def risk_loop_watchdog():
+    while True:
+        await asyncio.sleep(120)  # каждые 2 минуты
+
+        if LAST_RISK_EVAL_TS == 0:
+            continue
+
+        delta = time.time() - LAST_RISK_EVAL_TS
+
+        if delta > 300:  # 5 минут без risk_eval
+            log_event("system_warning", {
+                "type": "RISK_LOOP_STALL",
+                "last_risk_eval_sec_ago": int(delta),
+            })
+            for chat in active_chats:
+                try:
+                    await bot.send_message(
+                        chat,
+                        "⚠️ System warning: risk loop stalled. Data may be outdated."
+                    )
+                except:
+                    pass
+
+
 # ---------------- HEALTH ----------------
 
 class PingHandler(BaseHTTPRequestHandler):
@@ -591,15 +623,10 @@ async def on_startup(dp):
     ws_task = asyncio.create_task(start_ws_safe())
     asyncio.create_task(ws_watchdog())
     asyncio.create_task(global_risk_loop())
-
+    asyncio.create_task(risk_loop_watchdog())
 
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
-
-
-
-
-
 
 

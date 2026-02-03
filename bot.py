@@ -242,7 +242,7 @@ async def global_risk_loop():
                 price = getattr(ws, "mark_price", {}).get(symbol)
                 liq_sides = getattr(ws, "liq_sides", {}).get(symbol, {})
 
-                result = calculate_risk(
+                result = risk.calculate_risk(
                     f,
                     pf,
                     pressure_ratio,
@@ -628,5 +628,6 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 

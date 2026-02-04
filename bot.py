@@ -32,6 +32,8 @@ LAST_RISK_EVAL_TS = 0
 MARKET_REGIME_INTERVAL = 900  # 15 минут
 last_regime_ts = 0
 current_market_regime = "UNKNOWN"
+ACTIVITY_REGIME_INTERVAL = 900  # 15 минут
+last_activity_ts = 0
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
@@ -251,6 +253,20 @@ async def global_risk_loop():
         
             current_market_regime = regime
             last_regime_ts = now_ts
+
+        global last_activity_ts
+
+        if now_ts - last_activity_ts >= ACTIVITY_REGIME_INTERVAL:
+            activity = detect_activity_regime_live()
+        
+            log_event("activity_regime", {
+                "ts": now_ts,
+                "regime": activity["regime"],
+                "alerts": activity["alerts"],
+                "window_h": activity["window_h"],
+            })
+        
+            last_activity_ts = now_ts
 
 
         for symbol in SYMBOLS:
@@ -695,6 +711,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

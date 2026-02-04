@@ -21,6 +21,7 @@ from logger import log_event
 ACTIVITY_WINDOW_HOURS = 4
 ACTIVITY_CALM_MAX = 2
 ACTIVITY_FRAGILE_MAX = 5
+last_activity_regime = None
 
 ALERT_WINDOW_HOURS = 4  # ← можешь менять
 alert_history = defaultdict(deque)
@@ -229,6 +230,15 @@ def detect_activity_regime_live():
         "window_h": ACTIVITY_WINDOW_HOURS,
     }
 
+def detect_activity_transition(prev, current):
+    if prev is None:
+        return None
+
+    if prev != current:
+        return f"{prev} → {current}"
+
+    return None
+
 
 # ---------------- GLOBAL RISK LOOP ----------------
 
@@ -244,6 +254,7 @@ async def global_risk_loop():
             state = build_market_state()
             regime = detect_market_regime(state)
         
+        
             # логируем ВСЕГДА
             log_event("market_regime", {
                 "ts": now_ts,
@@ -258,6 +269,24 @@ async def global_risk_loop():
 
         if now_ts - last_activity_ts >= ACTIVITY_REGIME_INTERVAL:
             activity = detect_activity_regime_live()
+            global last_activity_regime
+
+            transition = detect_activity_transition(
+                last_activity_regime,
+                activity["regime"]
+            )
+            
+            if transition:
+                log_event("activity_transition", {
+                    "ts": now_ts,
+                    "from": last_activity_regime,
+                    "to": activity["regime"],
+                    "alerts": activity["alerts"],
+                    "window_h": activity["window_h"],
+                })
+            
+            last_activity_regime = activity["regime"]
+
         
             log_event("activity_regime", {
                 "ts": now_ts,
@@ -575,7 +604,6 @@ async def regime_cmd(message: types.Message):
     state = build_market_state()
     regime = detect_market_regime(state)
 
-
     text = (
         f"🌍 Market Regime: {regime}\n\n"
         f"Market metrics:\n"
@@ -711,10 +739,5 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
-
-
-
-
-
 
 

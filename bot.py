@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -62,7 +63,8 @@ diag_cooldowns = {
 
 ws_task = None
 ws_running = False
-message_queue = asyncio.Queue()
+MESSAGE_QUEUE_MAXSIZE = 2000
+message_queue = asyncio.Queue(maxsize=MESSAGE_QUEUE_MAXSIZE)
 
 SEND_DELAY_SECONDS = 0.2
 SEND_RETRY_LIMIT = 5
@@ -277,8 +279,6 @@ async def global_risk_loop():
 
         if now_ts - last_activity_ts >= ACTIVITY_REGIME_INTERVAL:
             activity = detect_activity_regime_live()
-            global last_activity_regime
-
             global last_activity_regime, last_activity_transition
 
             transition = detect_activity_transition(
@@ -303,17 +303,6 @@ async def global_risk_loop():
             
             last_activity_regime = activity["regime"]
 
-            
-            if transition:
-                log_event("activity_transition", {
-                    "ts": now_ts,
-                    "from": last_activity_regime,
-                    "to": activity["regime"],
-                    "alerts": activity["alerts"],
-                    "window_h": activity["window_h"],
-                })
-            
-            last_activity_regime = activity["regime"]
 
         
             log_event("activity_regime", {
@@ -725,7 +714,14 @@ async def risk_loop_watchdog():
 # ---------------- OUTBOX ----------------
 
 async def enqueue_message(chat_id, text):
-    await message_queue.put({"chat_id": chat_id, "text": text})
+    payload = {"chat_id": chat_id, "text": text}
+    try:
+        message_queue.put_nowait(payload)
+    except asyncio.QueueFull:
+        log_event("queue_drop", {
+            "chat_id": chat_id,
+            "reason": "message_queue_full",
+        })
 
 
 async def message_worker():
@@ -834,7 +830,3 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
-
-
-
-

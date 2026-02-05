@@ -4,8 +4,9 @@ import os
 import time
 from threading import Lock
 
-_LOG_TO_FILE = os.getenv("LOG_TO_FILE", "").lower() in ("1", "true", "yes")
-_LOG_FILE = "events.jsonl"
+_LOG_TO_FILE = os.getenv("LOG_TO_FILE", "1").lower() in ("1", "true", "yes")
+_LOG_TO_STDOUT = os.getenv("LOG_TO_STDOUT", "1").lower() in ("1", "true", "yes")
+_LOG_FILE = os.getenv("LOG_FILE_PATH", "bot_events.jsonl")
 
 _lock = Lock()
 
@@ -13,8 +14,8 @@ _lock = Lock()
 def log_event(event_type: str, payload: dict):
     """
     Универсальный логгер событий бота.
-    - Render / prod: stdout (JSONL)
-    - Local (LOG_TO_FILE=true): events.jsonl
+    - По умолчанию пишет в файл (bot_events.jsonl) и stdout (JSONL)
+    - Путь/поведение можно переопределить env-переменными
     """
 
     record = {
@@ -29,5 +30,5 @@ def log_event(event_type: str, payload: dict):
         if _LOG_TO_FILE:
             with open(_LOG_FILE, "a", encoding="utf-8") as f:
                 f.write(line + "\n")
-        else:
+        if _LOG_TO_STDOUT:
             print(line, flush=True)

@@ -68,6 +68,7 @@ message_queue = asyncio.Queue(maxsize=MESSAGE_QUEUE_MAXSIZE)
 
 SEND_DELAY_SECONDS = 0.2
 SEND_RETRY_LIMIT = 5
+RISK_DIAGNOSTIC_MODE = os.getenv("RISK_DIAGNOSTIC_MODE", "").lower() in ("1", "true", "yes")
 
 
 # ---------------- KEYBOARD ----------------
@@ -240,6 +241,16 @@ def detect_activity_regime_live():
         "window_h": ACTIVITY_WINDOW_HOURS,
     }
 
+def detect_activity_transition(prev, current):
+    if prev is None:
+        return None
+
+    if prev != current:
+        return f"{prev} → {current}"
+
+    return None
+
+
 # ---------------- GLOBAL RISK LOOP ----------------
 
 async def global_risk_loop():
@@ -270,26 +281,30 @@ async def global_risk_loop():
         if now_ts - last_activity_ts >= ACTIVITY_REGIME_INTERVAL:
             activity = detect_activity_regime_live()
             global last_activity_regime, last_activity_transition
-        
-            if last_activity_regime is None:
-                last_activity_regime = activity["regime"]
-            else:
-                if last_activity_regime != activity["regime"]:
-                    last_activity_transition = {
-                        "from": last_activity_regime,
-                        "to": activity["regime"],
-                        "ts": now_ts,
-                    }
-        
-                    log_event("activity_transition", {
-                        "ts": now_ts,
-                        "from": last_activity_regime,
-                        "to": activity["regime"],
-                        "alerts": activity["alerts"],
-                        "window_h": activity["window_h"],
-                    })
-        
-                    last_activity_regime = activity["regime"]
+
+            transition = detect_activity_transition(
+                last_activity_regime,
+                activity["regime"]
+            )
+            
+            if transition:
+                last_activity_transition = {
+                    "from": last_activity_regime,
+                    "to": activity["regime"],
+                    "ts": int(time.time()),
+                }
+            
+                log_event("activity_transition", {
+                    "ts": int(time.time()),
+                    "from": last_activity_regime,
+                    "to": activity["regime"],
+                    "alerts": activity["alerts"],
+                    "window_h": activity["window_h"],
+                })
+            
+            last_activity_regime = activity["regime"]
+
+
         
             log_event("activity_regime", {
                 "ts": now_ts,
@@ -370,9 +385,59 @@ async def global_risk_loop():
                 if oi_spike:
                     confidence += 1
                 confidence = min(confidence, 5)
-                
+
                 conf_level = meta.confidence_level(confidence)
-                
+
+                hard_candidate = bool(
+                    score >= HARD_ALERT_LEVEL
+                    and direction
+                    and confidence >= 3
+                )
+                buildup_candidate = score >= EARLY_ALERT_LEVEL
+
+                if RISK_DIAGNOSTIC_MODE:
+                    quality_level = quality.get("level", "UNKNOWN")
+                    queue_size = message_queue.qsize()
+                    queue_capacity = MESSAGE_QUEUE_MAXSIZE
+                    queue_fill_pct = round((queue_size / queue_capacity) * 100, 1) if queue_capacity else 0
+
+                    no_alert_reasons = []
+                    if quality_level == "LOW":
+                        no_alert_reasons.append("quality_low")
+                    if not buildup_candidate:
+                        no_alert_reasons.append("score_below_early_threshold")
+                    if score >= HARD_ALERT_LEVEL and not direction:
+                        no_alert_reasons.append("hard_missing_direction")
+                    if score >= HARD_ALERT_LEVEL and confidence < 3:
+                        no_alert_reasons.append("hard_low_confidence")
+
+                    log_event("risk_diagnostic", {
+                        "ts": int(time.time()),
+                        "symbol": symbol,
+                        "score": score,
+                        "direction": direction,
+                        "risk_driver": risk_driver,
+                        "long_ratio": round(pressure_ratio, 4),
+                        "long_percent": round(pressure_ratio * 100, 2),
+                        "funding": f,
+                        "funding_spike": funding_spike,
+                        "oi_points": len(oi_vals),
+                        "oi_spike": oi_spike,
+                        "liquidations": liq,
+                        "liq_threshold": LIQ_THRESHOLDS[symbol],
+                        "quality": quality_level,
+                        "confidence": confidence,
+                        "confidence_level": conf_level,
+                        "early_threshold": EARLY_ALERT_LEVEL,
+                        "hard_threshold": HARD_ALERT_LEVEL,
+                        "buildup_candidate": buildup_candidate,
+                        "hard_candidate": hard_candidate,
+                        "no_alert_reasons": no_alert_reasons,
+                        "queue_size": queue_size,
+                        "queue_capacity": queue_capacity,
+                        "queue_fill_pct": queue_fill_pct,
+                    })
+
                 now_ts = int(time.time())
                 
                 # ---------- HARD ALERT ----------
@@ -554,13 +619,6 @@ async def risk_cmd(message: types.Message):
         return
 
     score, direction, reasons, risk_driver = cache[symbol]
-    
-    display_driver = (
-        risk_driver
-        if risk_driver and score > 0
-        else "NONE"
-    )
-    
     snap = build_market_snapshot(symbol)
     disp = display_symbol(symbol)
     f = ws.funding.get(symbol)
@@ -576,39 +634,27 @@ async def risk_cmd(message: types.Message):
         text = (
             f"{disp}\n\n"
             f"Risk: {score}/10 ({direction or 'NEUTRAL'})\n"
-            f"Risk driver: {display_driver}\n"
+            f"Risk driver: {risk_driver}\n"
             f"Confidence: {meta.confidence_level(meta.calculate_confidence(score, direction, False, False, 0, None, {}))}\n\n"
-        
+    
             f"Market context:\n"
             f"• Funding: {percent_funding(f)}\n"
-            f"• Pressure: {build_market_snapshot(symbol).splitlines()[2].replace('Pressure: ', '')}\n"
-            f"• Alerts (last {activity['window_h']}h): {activity['alerts']}\n"
-            f"• Activity regime: {activity['regime']}\n"
-        )
-        
-        if last_activity_transition:
-            delta_h = int((time.time() - last_activity_transition["ts"]) / 3600)
-            text += (
-                f"• Last activity transition: "
-                f"{last_activity_transition['from']} → "
-                f"{last_activity_transition['to']} "
-                f"({delta_h}h ago)\n"
-            )
-        
-        text += (
-            f"\nTicker activity:\n"
+            f"• Pressure: {build_market_snapshot(symbol).splitlines()[2].replace('Pressure: ', '')}\n\n"
+    
+            f"Activity context:\n"
+            f"• BUILDUP alerts (last {activity['window_h']}h): {activity['alerts']}\n"
+            f"• Activity regime: {activity['regime']}\n\n"
+            
+            f"Risk activity:\n"
             f"• Buildups (last {ALERT_WINDOW_HOURS}h): {alerts_last}\n\n"
+
+    
+            f"Interpretation:\n"
+            f"Crowded positioning detected.\n"
+            f"Asymmetric risk is building.\n\n"
+    
+            f"This is a market risk log, not a forecast."
         )
-        
-        if score > 0:
-            text += (
-                f"Interpretation:\n"
-                f"Crowded positioning detected.\n"
-                f"Asymmetric risk is building.\n\n"
-            )
-
-        text += "This is a market risk log, not a forecast."
-
     
         await message.reply(text)
         return
@@ -638,7 +684,7 @@ async def regime_cmd(message: types.Message):
 
     text += (
         f"Activity (last {activity['window_h']}h):\n"
-        f"• Alerts: {activity['alerts']}\n"
+        f"• BUILDUP alerts: {activity['alerts']}\n"
         f"• Activity regime: {activity['regime']}\n"
     )
     
@@ -835,5 +881,6 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 

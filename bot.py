@@ -240,16 +240,6 @@ def detect_activity_regime_live():
         "window_h": ACTIVITY_WINDOW_HOURS,
     }
 
-def detect_activity_transition(prev, current):
-    if prev is None:
-        return None
-
-    if prev != current:
-        return f"{prev} → {current}"
-
-    return None
-
-
 # ---------------- GLOBAL RISK LOOP ----------------
 
 async def global_risk_loop():
@@ -280,30 +270,26 @@ async def global_risk_loop():
         if now_ts - last_activity_ts >= ACTIVITY_REGIME_INTERVAL:
             activity = detect_activity_regime_live()
             global last_activity_regime, last_activity_transition
-
-            transition = detect_activity_transition(
-                last_activity_regime,
-                activity["regime"]
-            )
-            
-            if transition:
-                last_activity_transition = {
-                    "from": last_activity_regime,
-                    "to": activity["regime"],
-                    "ts": int(time.time()),
-                }
-            
-                log_event("activity_transition", {
-                    "ts": int(time.time()),
-                    "from": last_activity_regime,
-                    "to": activity["regime"],
-                    "alerts": activity["alerts"],
-                    "window_h": activity["window_h"],
-                })
-            
-            last_activity_regime = activity["regime"]
-
-
+        
+            if last_activity_regime is None:
+                last_activity_regime = activity["regime"]
+            else:
+                if last_activity_regime != activity["regime"]:
+                    last_activity_transition = {
+                        "from": last_activity_regime,
+                        "to": activity["regime"],
+                        "ts": now_ts,
+                    }
+        
+                    log_event("activity_transition", {
+                        "ts": now_ts,
+                        "from": last_activity_regime,
+                        "to": activity["regime"],
+                        "alerts": activity["alerts"],
+                        "window_h": activity["window_h"],
+                    })
+        
+                    last_activity_regime = activity["regime"]
         
             log_event("activity_regime", {
                 "ts": now_ts,
@@ -585,25 +571,34 @@ async def risk_cmd(message: types.Message):
             f"Risk: {score}/10 ({direction or 'NEUTRAL'})\n"
             f"Risk driver: {risk_driver}\n"
             f"Confidence: {meta.confidence_level(meta.calculate_confidence(score, direction, False, False, 0, None, {}))}\n\n"
-    
+        
             f"Market context:\n"
             f"• Funding: {percent_funding(f)}\n"
-            f"• Pressure: {build_market_snapshot(symbol).splitlines()[2].replace('Pressure: ', '')}\n\n"
-    
-            f"Activity context:\n"
-            f"• BUILDUP alerts (last {activity['window_h']}h): {activity['alerts']}\n"
-            f"• Activity regime: {activity['regime']}\n\n"
-            
-            f"Risk activity:\n"
+            f"• Pressure: {build_market_snapshot(symbol).splitlines()[2].replace('Pressure: ', '')}\n"
+            f"• Alerts (last {activity['window_h']}h): {activity['alerts']}\n"
+            f"• Activity regime: {activity['regime']}\n"
+        )
+        
+        if last_activity_transition:
+            delta_h = int((time.time() - last_activity_transition["ts"]) / 3600)
+            text += (
+                f"• Last activity transition: "
+                f"{last_activity_transition['from']} → "
+                f"{last_activity_transition['to']} "
+                f"({delta_h}h ago)\n"
+            )
+        
+        text += (
+            f"\nTicker activity:\n"
             f"• Buildups (last {ALERT_WINDOW_HOURS}h): {alerts_last}\n\n"
-
-    
+        
             f"Interpretation:\n"
             f"Crowded positioning detected.\n"
             f"Asymmetric risk is building.\n\n"
-    
+        
             f"This is a market risk log, not a forecast."
         )
+
     
         await message.reply(text)
         return
@@ -633,7 +628,7 @@ async def regime_cmd(message: types.Message):
 
     text += (
         f"Activity (last {activity['window_h']}h):\n"
-        f"• BUILDUP alerts: {activity['alerts']}\n"
+        f"• Alerts: {activity['alerts']}\n"
         f"• Activity regime: {activity['regime']}\n"
     )
     
@@ -830,3 +825,4 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+

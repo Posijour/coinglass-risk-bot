@@ -17,6 +17,13 @@ from config import *
 from collections import defaultdict, deque
 from logger import log_event
 
+from datetime import datetime, timedelta, timezone
+
+LOG_FILE_PATH = "bot_events.jsonl"
+
+LOG_SEND_HOUR_UTC_PLUS_2 = 13
+LOG_TIMEZONE = timezone(timedelta(hours=2))
+
 # --- ACTIVITY REGIME CONFIG ---
 ACTIVITY_WINDOW_HOURS = 4
 ACTIVITY_CALM_MAX = 2
@@ -707,9 +714,61 @@ async def message_worker():
         message_queue.task_done()
 
 
+async def send_and_rotate_logs():
+    if not os.path.isfile(LOG_FILE_PATH):
+        return
+
+    if os.path.getsize(LOG_FILE_PATH) == 0:
+        return  # нечего отправлять
+
+    for chat in active_chats.copy():
+        try:
+            await bot.send_document(
+                chat_id=chat,
+                document=open(LOG_FILE_PATH, "rb"),
+                caption="📎 Daily risk logs (last 24h)"
+            )
+        except Exception as e:
+            print("LOG SEND ERROR:", e)
+            
+    log_event("daily_log_sent", {
+        "ts": int(time.time()),
+        "size_bytes": os.path.getsize(LOG_FILE_PATH),
+    })
+
+    # ---- ROTATE (clear file) ----
+    try:
+        with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
+            pass  # truncate
+        print("Log file rotated")
+    except Exception as e:
+        print("LOG ROTATE ERROR:", e)
+
+
+async def daily_log_scheduler():
+    while True:
+        now = datetime.now(LOG_TIMEZONE)
+
+        target = now.replace(
+            hour=LOG_SEND_HOUR_UTC_PLUS_2,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+
+        if now >= target:
+            target += timedelta(days=1)
+
+        sleep_seconds = (target - now).total_seconds()
+        await asyncio.sleep(sleep_seconds)
+
+        await send_and_rotate_logs()
+
+        # защита от двойного запуска
+        await asyncio.sleep(60)
+
+
 # ---------------- HEALTH ----------------
-
-
 class PingHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -726,7 +785,6 @@ def start_http():
 
 
 # ---------------- STARTUP ----------------
-
 async def on_startup(dp):
     global ws_task
     await bot.delete_webhook(drop_pending_updates=True)
@@ -735,9 +793,11 @@ async def on_startup(dp):
     asyncio.create_task(global_risk_loop())
     asyncio.create_task(risk_loop_watchdog())
     asyncio.create_task(message_worker())
-
+    asyncio.create_task(daily_log_scheduler())
+    
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 

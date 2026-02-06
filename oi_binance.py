@@ -1,6 +1,9 @@
 import time
 import requests
 
+MAX_OI_AGE = 15 * 60  # 15 минут
+
+
 BINANCE_OI_URL = "https://fapi.binance.com/futures/data/openInterestHist"
 
 class BinanceOIPoller:
@@ -25,18 +28,20 @@ class BinanceOIPoller:
         return r.json()
 
     def update(self):
-        now = int(time.time())
+        now = time.time()
+    
         for symbol in self.symbols:
-            try:
-                data = self.fetch_symbol(symbol)
-                if not data:
-                    continue
-
-                last = data[-1]
-                oi = float(last["sumOpenInterest"])
-
-                self.oi_window[symbol].append((now, oi))
-                self.oi_window[symbol] = self.oi_window[symbol][-self.window:]
+            # --- сброс протухшего окна ---
+            last_ts = self.last_update_ts.get(symbol)
+            if last_ts and now - last_ts > MAX_OI_AGE:
+                self.oi_window[symbol].clear()
+    
+            oi = self.fetch_oi(symbol)
+            if oi is None:
+                continue
+    
+            self.oi_window[symbol].append((now, oi))
+            self.last_update_ts[symbol] = now
 
             except Exception as e:
                 print(f"OI ERROR {symbol}: {e}")

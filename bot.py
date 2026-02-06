@@ -367,6 +367,9 @@ async def global_risk_loop():
                     "oi_spike": oi_spike,
                     "funding_spike": funding_spike,
                     "liq": liq,
+                    "long_ratio_current": round(current_ratio, 6),
+                    "long_ratio_used": round(pressure_ratio, 6),
+                    "long_ratio_source": ratio_source,
                 })
 
                 global LAST_RISK_EVAL_TS
@@ -425,6 +428,8 @@ async def global_risk_loop():
                         "direction": direction,
                         "risk_driver": risk_driver,
                         "long_ratio": round(pressure_ratio, 4),
+                        "long_ratio_current": round(current_ratio, 4),
+                        "long_ratio_source": ratio_source,
                         "long_percent": round(pressure_ratio * 100, 2),
                         "funding": f,
                         "funding_spike": funding_spike,
@@ -906,6 +911,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

@@ -21,7 +21,6 @@ oi_window = {s: deque() for s in SYMBOLS}
 trade_totals = {s: {"long": 0.0, "short": 0.0} for s in SYMBOLS}
 liq_totals = {s: {"long": 0.0, "short": 0.0} for s in SYMBOLS}
 last_trade_diag_ts = {s: 0 for s in SYMBOLS}
-ratio_extremes = {s: {"min": 1.0, "max": 0.0, "updated_ts": 0} for s in SYMBOLS}
 
 TRADE_QUEUE_DIAGNOSTIC_MODE = getenv("TRADE_QUEUE_DIAGNOSTIC_MODE", "").lower() in ("1", "true", "yes")
 try:
@@ -114,10 +113,6 @@ async def binance_ws():
 
                         total = long_short_ratio[symbol]["long"] + long_short_ratio[symbol]["short"]
                         long_share = (long_short_ratio[symbol]["long"] / total) if total else 0.5
-                        extremes = ratio_extremes[symbol]
-                        extremes["min"] = min(extremes["min"], long_share)
-                        extremes["max"] = max(extremes["max"], long_share)
-                        extremes["updated_ts"] = int(now)
 
                         if TRADE_QUEUE_DIAGNOSTIC_MODE:
                             last_diag = last_trade_diag_ts[symbol]
@@ -167,6 +162,7 @@ async def binance_ws():
             jitter = random.uniform(0.3, 1.3)
             await asyncio.sleep(backoff * jitter)
             backoff = min(backoff * 2, max_backoff)
+
 
 
 

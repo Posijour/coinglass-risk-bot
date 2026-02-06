@@ -5,7 +5,7 @@ import time
 import websockets
 from collections import deque
 from os import getenv
-from config import SYMBOLS, WINDOW_SECONDS
+from config import SYMBOLS, WINDOW_SECONDS, OPEN_INTEREST_STREAMS
 from logger import log_event
 
 funding = {}
@@ -14,6 +14,7 @@ long_short_ratio = {}
 liquidations = {}
 liq_sides = {}
 last_update = {}
+last_force_order_ts = {}
 
 trades_window = {s: deque() for s in SYMBOLS}
 liq_window = {s: deque() for s in SYMBOLS}
@@ -62,9 +63,14 @@ async def binance_ws():
     streams = []
     for s in SYMBOLS:
         s = s.lower()
+        oi_streams = [
+            f"{s}@{suffix}"
+            for suffix in OPEN_INTEREST_STREAMS
+        ]
+
         streams += [
             f"{s}@markPrice@1s",
-            f"{s}@openInterest@1s",
+            *oi_streams,
             f"{s}@aggTrade",
             f"{s}@forceOrder"
         ]
@@ -158,6 +164,7 @@ async def binance_ws():
                         liquidations[symbol] = (
                             liq_sides[symbol]["long"] + liq_sides[symbol]["short"]
                         )
+                        last_force_order_ts[symbol] = int(now)
                         touch(symbol)
 
         except Exception as exc:
@@ -169,3 +176,5 @@ async def binance_ws():
             jitter = random.uniform(0.3, 1.3)
             await asyncio.sleep(backoff * jitter)
             backoff = min(backoff * 2, max_backoff)
+
+

@@ -23,9 +23,13 @@ SYMBOLS = [
     "ZECUSDT",
 ]
 
+OI_USE_SINGLE_STREAM = os.getenv("OI_USE_SINGLE_STREAM", "").lower() in ("1", "true", "yes")
+OI_SINGLE_STREAM_SUFFIX = os.getenv("OI_SINGLE_STREAM_SUFFIX", "")
+
+
 OPEN_INTEREST_STREAMS = [
     stream.strip()
-    for stream in os.getenv("OPEN_INTEREST_STREAMS").split(",")
+    for stream in os.getenv("OPEN_INTEREST_STREAMS", "openInterest@1s").split(",")
     if stream.strip()
 ]
 
@@ -58,9 +62,3 @@ LIQ_THRESHOLDS = {
     "ZECUSDT": 2_000_000,
     "HYPEUSDT": 1_500_000,
 }
-
-
-
-
-
-

@@ -321,7 +321,26 @@ async def global_risk_loop():
 
                 ls = ws.long_short_ratio.get(symbol, {"long": 0, "short": 0})
                 total = ls["long"] + ls["short"]
-                pressure_ratio = ls["long"] / total if total else 0.5
+                current_ratio = ls["long"] / total if total else 0.5
+
+                extremes = getattr(ws, "ratio_extremes", {}).get(symbol)
+                pressure_ratio = current_ratio
+                ratio_source = "current"
+
+                if extremes:
+                    min_ratio = extremes.get("min", current_ratio)
+                    max_ratio = extremes.get("max", current_ratio)
+
+                    if abs(min_ratio - 0.5) >= abs(max_ratio - 0.5):
+                        pressure_ratio = min_ratio
+                        ratio_source = "interval_min"
+                    else:
+                        pressure_ratio = max_ratio
+                        ratio_source = "interval_max"
+
+                    extremes["min"] = current_ratio
+                    extremes["max"] = current_ratio
+                    extremes["updated_ts"] = int(now)
 
                 price = getattr(ws, "mark_price", {}).get(symbol)
                 liq_sides = getattr(ws, "liq_sides", {}).get(symbol, {})
@@ -887,6 +906,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

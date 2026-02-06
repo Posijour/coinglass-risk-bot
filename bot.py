@@ -55,6 +55,7 @@ prev_scores = {}
 last_funding = {}
 prev_funding = {}
 last_funding_ts = {}
+last_oi_snapshot = {}
 
 diag_cooldowns = {
     "oi": {},
@@ -317,11 +318,22 @@ async def global_risk_loop():
                     last_funding_ts[symbol] = now
 
                 oi_vals = ws.oi_window.get(symbol, [])
+                oi_for_risk = oi_vals
+
+                if len(oi_vals) == 1:
+                    prev_oi_snapshot = last_oi_snapshot.get(symbol)
+                    if prev_oi_snapshot and prev_oi_snapshot > 0:
+                        oi_for_risk = [(now - INTERVAL_SECONDS, prev_oi_snapshot), oi_vals[0]]
+
+                if oi_vals:
+                    last_oi_snapshot[symbol] = oi_vals[-1][1]
+
                 liq = ws.liquidations.get(symbol, 0)
 
                 ls = ws.long_short_ratio.get(symbol, {"long": 0, "short": 0})
                 total = ls["long"] + ls["short"]
                 current_ratio = ls["long"] / total if total else 0.5
+
                 pressure_ratio = current_ratio
                 ratio_source = "current"
 
@@ -332,7 +344,7 @@ async def global_risk_loop():
                     f,
                     pf,
                     pressure_ratio,
-                    oi_vals,
+                    oi_for_risk,
                     liq,
                     LIQ_THRESHOLDS[symbol],
                     price,
@@ -342,9 +354,9 @@ async def global_risk_loop():
                 cache[symbol] = (score, direction, reasons, risk_driver)
 
                 funding_delta = abs(f - pf) if (f is not None and pf is not None) else None
-                oi_change_pct = None
-                if len(oi_vals) >= 2 and oi_vals[0][1] > 0:
-                    oi_change_pct = abs(oi_vals[-1][1] - oi_vals[0][1]) / oi_vals[0][1]
+                oi_change_pct = 0.0
+                if len(oi_for_risk) >= 2 and oi_for_risk[0][1] > 0:
+                    oi_change_pct = abs(oi_for_risk[-1][1] - oi_for_risk[0][1]) / oi_for_risk[0][1]
 
                 log_event("risk_eval", {
                     "symbol": symbol,
@@ -357,6 +369,7 @@ async def global_risk_loop():
                     "funding_spike_threshold": FUNDING_SPIKE_THRESHOLD,
                     "funding_spike": funding_spike,
                     "oi_change_pct": oi_change_pct,
+                    "oi_points": len(oi_for_risk),
                     "oi_spike_threshold": OI_SPIKE_THRESHOLD,
                     "oi_spike": oi_spike,
                     "liq": liq,
@@ -365,7 +378,6 @@ async def global_risk_loop():
                     "long_ratio_used": round(pressure_ratio, 6),
                     "long_ratio_source": ratio_source,
                 })
-
 
                 global LAST_RISK_EVAL_TS
                 LAST_RISK_EVAL_TS = int(time.time())
@@ -906,12 +918,3 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
-
-
-
-
-
-
-
-
-

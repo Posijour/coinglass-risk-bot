@@ -37,8 +37,12 @@ class BinanceOIPoller:
         if not data:
             return None
 
+        latest = data[-1]
         # Binance возвращает строку
-        return float(data[-1]["sumOpenInterest"])
+        oi_value = float(latest["sumOpenInterest"])
+        ts_ms = latest.get("timestamp")
+        ts = ts_ms / 1000 if ts_ms is not None else None
+        return oi_value, ts
 
     def update(self):
         now = time.time()
@@ -50,12 +54,19 @@ class BinanceOIPoller:
                 if last_ts and now - last_ts > MAX_OI_AGE:
                     self.oi_window[symbol].clear()
 
-                oi = self.fetch_oi(symbol)
-                if oi is None:
+                result = self.fetch_oi(symbol)
+                if result is None:
                     continue
 
-                self.oi_window[symbol].append((now, oi))
-                self.last_update_ts[symbol] = now
+                oi, ts = result
+                if ts is None:
+                    ts = now
+
+                if last_ts and ts <= last_ts:
+                    continue
+
+                self.oi_window[symbol].append((ts, oi))
+                self.last_update_ts[symbol] = ts
 
             except Exception as e:
                 print(f"OI ERROR {symbol}: {e}")

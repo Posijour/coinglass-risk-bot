@@ -358,6 +358,9 @@ async def global_risk_loop():
                 if len(oi_for_risk) >= 2 and oi_for_risk[0][1] > 0:
                     oi_change_pct = abs(oi_for_risk[-1][1] - oi_for_risk[0][1]) / oi_for_risk[0][1]
 
+                last_oi_ts = int(oi_vals[-1][0]) if oi_vals else None
+                last_force_order_ts = getattr(ws, "last_force_order_ts", {}).get(symbol)
+
                 log_event("risk_eval", {
                     "symbol": symbol,
                     "risk": score,
@@ -372,6 +375,9 @@ async def global_risk_loop():
                     "oi_points": len(oi_for_risk),
                     "oi_spike_threshold": OI_SPIKE_THRESHOLD,
                     "oi_spike": oi_spike,
+                    "oi_window_len": len(oi_vals),
+                    "last_oi_ts": last_oi_ts,
+                    "last_force_order_ts": last_force_order_ts,
                     "liq": liq,
                     "liq_threshold": LIQ_THRESHOLDS[symbol],
                     "long_ratio_current": round(current_ratio, 6),

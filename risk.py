@@ -84,6 +84,11 @@ def calculate_risk(
     direction = None
     if direction_votes["LONG"] != direction_votes["SHORT"]:
         direction = max(direction_votes, key=direction_votes.get)
+    elif long_ratio >= 0.7:
+        direction = "LONG"
+    elif long_ratio <= 0.3:
+        direction = "SHORT"
+
     risk_driver = detect_risk_driver(
         funding=funding,
         funding_spike=funding_spike,
@@ -128,5 +133,6 @@ def detect_risk_driver(
         return drivers[0]
 
     return "MIXED"
+
 
 

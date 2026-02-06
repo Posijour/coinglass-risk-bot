@@ -4,8 +4,7 @@ import random
 import time
 import websockets
 from collections import deque
-from os import getenv
-from config import SYMBOLS, WINDOW_SECONDS, OPEN_INTEREST_STREAMS, OI_USE_SINGLE_STREAM, OI_SINGLE_STREAM_SUFFIX
+from config import SYMBOLS, WINDOW_SECONDS
 from logger import log_event
 
 funding = {}
@@ -15,22 +14,12 @@ liquidations = {}
 liq_sides = {}
 last_update = {}
 last_force_order_ts = {}
-oi_stream_last_ts = {}
-last_oi_stream_log_ts = 0
 
 trades_window = {s: deque() for s in SYMBOLS}
 liq_window = {s: deque() for s in SYMBOLS}
 oi_window = {s: deque() for s in SYMBOLS}
 trade_totals = {s: {"long": 0.0, "short": 0.0} for s in SYMBOLS}
 liq_totals = {s: {"long": 0.0, "short": 0.0} for s in SYMBOLS}
-last_trade_diag_ts = {s: 0 for s in SYMBOLS}
-
-TRADE_QUEUE_DIAGNOSTIC_MODE = getenv("TRADE_QUEUE_DIAGNOSTIC_MODE", "").lower() in ("1", "true", "yes")
-try:
-    TRADE_QUEUE_DIAGNOSTIC_INTERVAL = max(1, int(getenv("TRADE_QUEUE_DIAGNOSTIC_INTERVAL", "60")))
-except ValueError:
-    TRADE_QUEUE_DIAGNOSTIC_INTERVAL = 60
-
 
 def touch(symbol):
     last_update[symbol] = int(time.time())
@@ -61,9 +50,6 @@ def _append_open_interest(symbol, oi_value, ts=None):
     cleanup_window(oi_window[symbol])
     touch(symbol)
 
-
-
-
 def cleanup_liq(symbol):
     now = time.time()
     dq = liq_window[symbol]
@@ -71,74 +57,22 @@ def cleanup_liq(symbol):
         _, qty, side = dq.popleft()
         liq_totals[symbol][side] = max(0.0, liq_totals[symbol][side] - qty)
 
-
-async def open_interest_ws(symbol, suffix):
-    backoff = 1
-    max_backoff = 60
-    stream_symbol = symbol.lower()
-    stream_suffix = suffix
-    url = f"wss://fstream.binance.com/ws/{stream_symbol}@{stream_suffix}"
-    stream_name = f"{stream_symbol}@{stream_suffix}"
-
-    while True:
-        try:
-            async with websockets.connect(url, ping_interval=20) as ws:
-                backoff = 1
-                async for raw in ws:
-                    data = json.loads(raw)
-                    msg_symbol = data.get("s", "").upper() or symbol
-                    if msg_symbol not in SYMBOLS:
-                        continue
-                    oi = data.get("oi")
-                    if oi is None:
-                        continue
-                    oi_stream_last_ts[stream_name] = int(time.time())
-                    _append_open_interest(msg_symbol, oi)
-        except Exception as exc:
-            log_event("ws_error", {
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-                "backoff": backoff,
-                "stream": "open_interest_single",
-                "symbol": symbol,
-                "suffix": suffix,
-            })
-            jitter = random.uniform(0.3, 1.3)
-            await asyncio.sleep(backoff * jitter)
-            backoff = min(backoff * 2, max_backoff)
-
-
-
-
 async def binance_ws():
     streams = []
 
-    if OI_USE_SINGLE_STREAM:
-        suffix = OI_SINGLE_STREAM_SUFFIX or (OPEN_INTEREST_STREAMS[0] if OPEN_INTEREST_STREAMS else "openInterest@1s")
-        for symbol in SYMBOLS:
-            asyncio.create_task(open_interest_ws(symbol, suffix))
-
     for s in SYMBOLS:
         s = s.lower()
-        oi_streams = []
-        if not OI_USE_SINGLE_STREAM:
-            for suffix in OPEN_INTEREST_STREAMS:
-                if suffix.startswith("!"):
-                    oi_streams.append(suffix)
-                else:
-                    oi_streams.append(f"{s}@{suffix}")
 
         streams += [
             f"{s}@markPrice@1s",
-            *oi_streams,
             f"{s}@aggTrade",
             f"{s}@forceOrder"
         ]
 
     url = f"wss://fstream.binance.com/stream?streams={'/'.join(streams)}"
-    global last_oi_stream_log_ts
     backoff = 1
     max_backoff = 60
+
     while True:
         try:
             async with websockets.connect(url, ping_interval=20) as ws:
@@ -159,53 +93,18 @@ async def binance_ws():
                         mark_price[symbol] = float(data["p"])
                         touch(symbol)
 
-                    elif "openInterest" in stream:
-                        oi_stream_last_ts[stream] = int(now)
-                        if isinstance(data, list):
-                            for item in data:
-                                item_symbol = item.get("s", "").upper()
-                                oi = item.get("oi")
-                                if not item_symbol or oi is None:
-                                    continue
-                                _append_open_interest(item_symbol, oi, now)
-                        else:
-                            oi = data.get("oi")
-                            if oi is not None:
-                                _append_open_interest(symbol, oi, now)
                     elif "aggTrade" in stream:
                         qty = float(data["q"])
                         side = "short" if data["m"] else "long"
 
                         trades_window[symbol].append((now, qty, side))
                         trade_totals[symbol][side] += qty
-                        removed = cleanup_trades(symbol)
+                        cleanup_trades(symbol)
 
                         long_short_ratio[symbol] = {
                             "long": trade_totals[symbol]["long"],
                             "short": trade_totals[symbol]["short"]
                         }
-
-                        total = long_short_ratio[symbol]["long"] + long_short_ratio[symbol]["short"]
-                        long_share = (long_short_ratio[symbol]["long"] / total) if total else 0.5
-
-                        if TRADE_QUEUE_DIAGNOSTIC_MODE:
-                            last_diag = last_trade_diag_ts[symbol]
-                            if now - last_diag >= TRADE_QUEUE_DIAGNOSTIC_INTERVAL:
-                                q = trades_window[symbol]
-                                oldest_age = round(now - q[0][0], 2) if q else 0.0
-
-                                log_event("trade_queue_diagnostic", {
-                                    "ts": int(now),
-                                    "symbol": symbol,
-                                    "window_seconds": WINDOW_SECONDS,
-                                    "queue_len": len(q),
-                                    "oldest_trade_age_sec": oldest_age,
-                                    "removed_on_cleanup": removed,
-                                    "long_qty": round(long_short_ratio[symbol]["long"], 8),
-                                    "short_qty": round(long_short_ratio[symbol]["short"], 8),
-                                    "long_ratio": round(long_share, 6),
-                                })
-                                last_trade_diag_ts[symbol] = now
 
                         touch(symbol)
 
@@ -234,15 +133,9 @@ async def binance_ws():
                         )
                         last_force_order_ts[symbol] = int(now)
                         touch(symbol)
-                    if now - last_oi_stream_log_ts >= 300:
-                        log_event("oi_stream_diagnostic", {
-                            "ts": int(now),
-                            "stream_count": len(oi_stream_last_ts),
-                            "streams": dict(sorted(oi_stream_last_ts.items())),
-                        })
-                        last_oi_stream_log_ts = now
 
         except Exception as exc:
+
             log_event("ws_error", {
                 "error_type": type(exc).__name__,
                 "error": str(exc),
@@ -251,3 +144,4 @@ async def binance_ws():
             jitter = random.uniform(0.3, 1.3)
             await asyncio.sleep(backoff * jitter)
             backoff = min(backoff * 2, max_backoff)
+

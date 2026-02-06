@@ -93,6 +93,10 @@ def calculate_risk(
 
     risk_driver = detect_risk_driver(
         funding=funding,
+        funding_extreme=(
+            funding is not None
+            and abs(funding) > FUNDING_EXTREME_THRESHOLD
+        ),
         funding_spike=funding_spike,
         long_ratio=long_ratio,
         oi_spike=oi_spike,
@@ -104,6 +108,7 @@ def calculate_risk(
 
 def detect_risk_driver(
     funding,
+    funding_extreme,
     funding_spike,
     long_ratio,
     oi_spike,
@@ -121,8 +126,10 @@ def detect_risk_driver(
         drivers.append("LIQUIDATION")
 
     # FUNDING
-    if funding_spike:
+    if funding_extreme:
         drivers.append("FUNDING")
+    elif funding_spike:
+        drivers.append("FUNDING SPIKE")
 
     # OPEN INTEREST
     if oi_spike:
@@ -135,6 +142,7 @@ def detect_risk_driver(
         return drivers[0]
 
     return "MIXED"
+
 
 
 

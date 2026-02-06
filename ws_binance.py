@@ -5,7 +5,7 @@ import time
 import websockets
 from collections import deque
 from os import getenv
-from config import SYMBOLS, WINDOW_SECONDS, OPEN_INTEREST_STREAMS
+from config import SYMBOLS, WINDOW_SECONDS, OPEN_INTEREST_STREAMS, OI_USE_SINGLE_STREAM, OI_SINGLE_STREAM_SUFFIX
 from logger import log_event
 
 funding = {}
@@ -59,14 +59,62 @@ def cleanup_liq(symbol):
         liq_totals[symbol][side] = max(0.0, liq_totals[symbol][side] - qty)
 
 
+async def open_interest_ws(symbol, suffix):
+    backoff = 1
+    max_backoff = 60
+    stream_symbol = symbol.lower()
+    stream_suffix = suffix
+    url = f"wss://fstream.binance.com/ws/{stream_symbol}@{stream_suffix}"
+
+    while True:
+        try:
+            async with websockets.connect(url, ping_interval=20) as ws:
+                backoff = 1
+                async for raw in ws:
+                    data = json.loads(raw)
+                    msg_symbol = data.get("s", "").upper() or symbol
+                    if msg_symbol not in SYMBOLS:
+                        continue
+                    oi = data.get("oi")
+                    if oi is None:
+                        continue
+                    now = time.time()
+                    oi = float(oi)
+                    oi_window[msg_symbol].append((now, oi))
+                    cleanup_window(oi_window[msg_symbol])
+                    touch(msg_symbol)
+        except Exception as exc:
+            log_event("ws_error", {
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "backoff": backoff,
+                "stream": "open_interest_single",
+                "symbol": symbol,
+                "suffix": suffix,
+            })
+            jitter = random.uniform(0.3, 1.3)
+            await asyncio.sleep(backoff * jitter)
+            backoff = min(backoff * 2, max_backoff)
+
+
+
+
 async def binance_ws():
     streams = []
+
+    if OI_USE_SINGLE_STREAM:
+        suffix = OI_SINGLE_STREAM_SUFFIX or (OPEN_INTEREST_STREAMS[0] if OPEN_INTEREST_STREAMS else "openInterest@1s")
+        for symbol in SYMBOLS:
+            asyncio.create_task(open_interest_ws(symbol, suffix))
+
     for s in SYMBOLS:
         s = s.lower()
-        oi_streams = [
-            f"{s}@{suffix}"
-            for suffix in OPEN_INTEREST_STREAMS
-        ]
+        oi_streams = []
+        if not OI_USE_SINGLE_STREAM:
+            oi_streams = [
+                f"{s}@{suffix}"
+                for suffix in OPEN_INTEREST_STREAMS
+            ]
 
         streams += [
             f"{s}@markPrice@1s",

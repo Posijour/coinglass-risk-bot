@@ -62,3 +62,5 @@ LIQ_THRESHOLDS = {
     "ZECUSDT": 2_000_000,
     "HYPEUSDT": 1_500_000,
 }
+
+

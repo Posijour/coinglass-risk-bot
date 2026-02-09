@@ -391,6 +391,7 @@ async def global_risk_loop():
                     "liq": liq,
                     "liq_threshold": LIQ_THRESHOLDS[symbol],
                     "long_ratio_current": round(current_ratio, 6),
+                    "price": price,
                 })
 
                 global LAST_RISK_EVAL_TS
@@ -447,6 +448,7 @@ async def global_risk_loop():
                         "event_id": f"{symbol}:{now_ts}:HARD",
                         "chat_id": "broadcast",
                         "risk_driver": risk_driver,
+                        "price": price,
                     }
                     
                     for chat in active_chats.copy():
@@ -480,7 +482,7 @@ async def global_risk_loop():
                         "type": "BUILDUP",
                         "event_id": f"{symbol}:{now_ts}:BUILDUP",
                         "chat_id": "broadcast",
-                        "risk_driver": risk_driver,
+                        "price": price,
                     }
                     for chat in active_chats.copy():
                         await enqueue_message(chat, text, meta=alert_meta)
@@ -907,6 +909,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

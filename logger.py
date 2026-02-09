@@ -10,6 +10,8 @@ _LOG_FILE = os.getenv("LOG_FILE_PATH", "bot_events.jsonl")
 
 _lock = Lock()
 
+def now_ts_ms():
+    return int(time.time() * 1000)
 
 def log_event(event_type: str, payload: dict):
     """

@@ -17,7 +17,7 @@ import divergence
 from config import *
 
 from collections import defaultdict, deque
-from logger import log_event
+from logger import log_event, now_ts_ms
 
 from datetime import datetime, timedelta, timezone
 
@@ -92,24 +92,23 @@ def display_symbol(symbol: str) -> str:
 def record_alert_if_first(meta):
     if not meta:
         return
+
     event_id = meta.get("event_id")
     symbol = meta.get("symbol")
-    if not event_id or not symbol:
+    ts_ms = meta.get("ts_unix_ms")
+
+    if not event_id or not symbol or not ts_ms:
         return
-    ts = meta.get("ts") or int(time.time())
+
     if event_id in recorded_alert_ids:
         return
-    recorded_alert_ids[event_id] = ts
 
-    cutoff = ts - ALERT_WINDOW_HOURS * 3600
-    alert_history[symbol].append(ts)
+    recorded_alert_ids[event_id] = ts_ms
+    alert_history[symbol].append(ts_ms)
+
+    cutoff = ts_ms - ALERT_WINDOW_HOURS * 3600 * 1000
     while alert_history[symbol] and alert_history[symbol][0] < cutoff:
         alert_history[symbol].popleft()
-
-    stale_ids = [key for key, value in recorded_alert_ids.items() if value < cutoff]
-    for key in stale_ids:
-        recorded_alert_ids.pop(key, None)
-
 
 # ---------------- FUNDING HELPERS ----------------
 
@@ -242,12 +241,12 @@ def detect_activity_regime_live():
     Alert-based activity regime (independent from market regime)
     """
 
-    now = time.time()
-    cutoff = now - ACTIVITY_WINDOW_HOURS * 3600
-
-    alerts_count = 0
-    for q in alert_history.values():
-        alerts_count += sum(1 for ts in q if ts >= cutoff)
+    now_ms = now_ts_ms()
+    cutoff = now_ms - ACTIVITY_WINDOW_HOURS * 3600 * 1000
+    
+    alerts_count = sum(
+        1 for q in alert_history.values() for ts in q if ts >= cutoff
+    )
 
     if alerts_count <= ACTIVITY_CALM_MAX:
         regime = "CALM"
@@ -271,26 +270,26 @@ async def global_risk_loop():
     while True:
         global last_regime_ts, current_market_regime
 
-        now_ts_ms = int(now * 1000)
+        now_ms = now_ts_ms()
     
-        if now_ts - last_regime_ts >= MARKET_REGIME_INTERVAL:
+        if now_ms - last_regime_ts >= MARKET_REGIME_INTERVAL * 1000:
             state = build_market_state()
             regime = detect_market_regime(state)
         
         
             # логируем ВСЕГДА
             log_event("market_regime", {
-                "ts": now_ts,
+                "ts_unix_ms": now_ms,
                 "regime": regime,
                 **state,
             })
         
             current_market_regime = regime
-            last_regime_ts = now_ts
+            last_regime_ts = now_ms
 
         global last_activity_ts
 
-        if now_ts - last_activity_ts >= ACTIVITY_REGIME_INTERVAL:
+        if now_ms - last_activity_ts >= ACTIVITY_REGIME_INTERVAL * 1000:
             activity = detect_activity_regime_live()
             global last_activity_regime, last_activity_transition
 
@@ -301,11 +300,11 @@ async def global_risk_loop():
                     last_activity_transition = {
                         "from": last_activity_regime,
                         "to": activity["regime"],
-                        "ts": now_ts,
+                        "ts_unix_ms": now_ms,
                     }
         
                     log_event("activity_transition", {
-                        "ts": now_ts,
+                        "ts_unix_ms": now_ms,
                         "from": last_activity_regime,
                         "to": activity["regime"],
                         "alerts": activity["alerts"],
@@ -316,30 +315,26 @@ async def global_risk_loop():
 
         
             log_event("activity_regime", {
-                "ts": now_ts,
+                "ts_unix_ms": now_ms,
                 "regime": activity["regime"],
                 "alerts": activity["alerts"],
                 "window_h": activity["window_h"],
             })
         
-            last_activity_ts = now_ts
+            last_activity_ts = now_ms
 
 
         for symbol in SYMBOLS:
             try:
-                now = time.time()
-                now = time.time()
-                now_ts = int(now)
-                now_ts_ms = int(now * 1000)
-                now_iso = datetime.utcfromtimestamp(now).isoformat() + "Z"
-                
+                now_ms = now_ts_ms()
+
                 f = ws.funding.get(symbol)
                 pf = last_funding.get(symbol)
 
                 if f is not None:
                     prev_funding[symbol] = pf
                     last_funding[symbol] = f
-                    last_funding_ts[symbol] = now
+                    last_funding_ts[symbol] = now_ms
 
                 oi_vals = oi_poller.oi_window.get(symbol, [])
                 oi_for_risk = oi_vals
@@ -347,7 +342,7 @@ async def global_risk_loop():
                 if len(oi_vals) == 1:
                     prev_oi_snapshot = last_oi_snapshot.get(symbol)
                     if prev_oi_snapshot and prev_oi_snapshot > 0:
-                        oi_for_risk = [(now - INTERVAL_SECONDS, prev_oi_snapshot), oi_vals[0]]
+                        oi_for_risk = [(now_ms - INTERVAL_SECONDS * 1000, prev_oi_snapshot), oi_vals[0]]
 
                 if oi_vals:
                     last_oi_snapshot[symbol] = oi_vals[-1][1]
@@ -381,6 +376,7 @@ async def global_risk_loop():
                     oi_change_pct = abs(oi_for_risk[-1][1] - oi_for_risk[0][1]) / oi_for_risk[0][1]
 
                 log_event("risk_eval", {
+                    "ts_unix_ms": now_ms,
                     "symbol": symbol,
                     "risk": score,
                     "direction": direction,
@@ -398,7 +394,7 @@ async def global_risk_loop():
                 })
 
                 global LAST_RISK_EVAL_TS
-                LAST_RISK_EVAL_TS = int(time.time())
+                LAST_RISK_EVAL_TS = now_ms
 
                 # -------- RISK ALERTS --------
                 quality = meta.stream_quality(symbol)
@@ -442,13 +438,13 @@ async def global_risk_loop():
                     )
                 
                     alert_meta = {
-                        "ts": now_ts,
+                        "ts_unix_ms": now_ms,
                         "symbol": symbol,
                         "risk": score,
                         "direction": direction,
                         "confidence": confidence,
                         "type": "HARD",
-                        "event_id": f"{symbol}:{now_ts}:HARD",
+                        "event_id": f"{symbol}:{now_ms}:HARD",
                         "chat_id": "broadcast",
                         "risk_driver": risk_driver,
                         "price": price,
@@ -460,7 +456,7 @@ async def global_risk_loop():
                 
                 # ---------- BUILDUP ALERT ----------
                 elif score >= EARLY_ALERT_LEVEL:
-                    cutoff = now_ts - ALERT_WINDOW_HOURS * 3600
+                    cutoff = now_ms - ALERT_WINDOW_HOURS * 3600 * 1000
                     while alert_history[symbol] and alert_history[symbol][0] < cutoff:
                         alert_history[symbol].popleft()
 
@@ -477,13 +473,13 @@ async def global_risk_loop():
                         text += f"\nConfidence: {conf_level}\nReason: {reasons[0]}"
                 
                     alert_meta = {
-                        "ts": now_ts,
+                        "ts_unix_ms": now_ms,
                         "symbol": symbol,
                         "risk": score,
                         "direction": direction,
                         "confidence": confidence,
                         "type": "BUILDUP",
-                        "event_id": f"{symbol}:{now_ts}:BUILDUP",
+                        "event_id": f"{symbol}:{now_ms}:BUILDUP",
                         "chat_id": "broadcast",
                         "price": price,
                     }
@@ -595,7 +591,7 @@ async def risk_cmd(message: types.Message):
     ensure_chat(message.chat.id)
 
     log_event("cmd_risk", {
-        "ts": int(time.time()),
+        "ts_unix_ms": now_ts_ms(),
         "chat_id": message.chat.id,
         "text": message.text,
     })
@@ -623,8 +619,8 @@ async def risk_cmd(message: types.Message):
 
     if len(parts) >= 3 and parts[2].lower() == "full":
         activity = detect_activity_regime_live()
-        now_ts = int(time.time())
-        cutoff = now_ts - ALERT_WINDOW_HOURS * 3600
+        now_ms = now_ts_ms()
+        cutoff = now_ms - ALERT_WINDOW_HOURS * 3600 * 1000
     
         history = alert_history.get(symbol, [])
         alerts_last = sum(1 for ts in history if ts >= cutoff)
@@ -643,7 +639,7 @@ async def risk_cmd(message: types.Message):
         )
         
         if last_activity_transition:
-            delta_h = int((time.time() - last_activity_transition["ts"]) / 3600)
+            delta_h = int((now_ts_ms() - last_activity_transition["ts_unix_ms"]) / 1000 / 3600)
             text += (
                 f"• Last activity transition: "
                 f"{last_activity_transition['from']} → "
@@ -700,9 +696,7 @@ async def regime_cmd(message: types.Message):
     )
     
     if last_activity_transition:
-        delta_h = int(
-            (time.time() - last_activity_transition["ts"]) / 3600
-        )
+        delta_h = int((now_ts_ms() - last_activity_transition["ts_unix_ms"]) / 1000 / 3600)
     
         text += (
             f"• Last transition: "
@@ -759,9 +753,9 @@ async def risk_loop_watchdog():
         if LAST_RISK_EVAL_TS == 0:
             continue
 
-        delta = time.time() - LAST_RISK_EVAL_TS
+        delta_sec = (now_ts_ms() - LAST_RISK_EVAL_TS) / 1000
 
-        if delta > 330:  # 5 минут без risk_eval
+        if delta_sec > 330:  # 5 минут без risk_eval
             log_event("system_warning", {
                 "type": "RISK_LOOP_STALL",
                 "last_risk_eval_sec_ago": int(delta),
@@ -834,7 +828,7 @@ async def send_and_rotate_logs():
             print("LOG SEND ERROR:", e)
             
     log_event("daily_log_sent", {
-        "ts": int(time.time()),
+        "ts_unix_ms": now_ts_ms(),
         "size_bytes": os.path.getsize(LOG_FILE_PATH),
     })
 
@@ -891,7 +885,7 @@ async def oi_loop():
             oi_poller.update()
         except Exception as e:
             log_event("oi_poll_error", {
-                "ts": int(time.time()),
+                "ts_unix_ms": now_ts_ms(),
                 "error": str(e),
             })
         await asyncio.sleep(60)
@@ -912,11 +906,3 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
-
-
-
-
-
-
-
-

@@ -271,7 +271,7 @@ async def global_risk_loop():
     while True:
         global last_regime_ts, current_market_regime
 
-        now_ts = int(time.time())
+        now_ts_ms = int(now * 1000)
     
         if now_ts - last_regime_ts >= MARKET_REGIME_INTERVAL:
             state = build_market_state()
@@ -381,9 +381,6 @@ async def global_risk_loop():
                     oi_change_pct = abs(oi_for_risk[-1][1] - oi_for_risk[0][1]) / oi_for_risk[0][1]
 
                 log_event("risk_eval", {
-                    "ts_unix": now_ts,
-                    "ts_unix_ms": now_ts_ms,
-                    "ts_iso": now_iso,
                     "symbol": symbol,
                     "risk": score,
                     "direction": direction,
@@ -915,6 +912,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

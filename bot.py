@@ -384,20 +384,28 @@ async def global_risk_loop():
                 if len(oi_for_risk) >= 2 and oi_for_risk[0][1] > 0:
                     oi_change_pct = abs(oi_for_risk[-1][1] - oi_for_risk[0][1]) / oi_for_risk[0][1]
 
-                payload = {
-                    "ts_unix_ms": now_ms,
-                    "symbol": symbol,
-                    "risk": score,
-                    "direction": direction,
-                    "risk_driver": risk_driver,
-                    "funding": f,
-                    "funding_spike": funding_spike,
-                    "oi_spike": oi_spike,
-                    "liq": liq,
-                    "price": price,
-                }
-                
-                log_event("risk_eval", payload)
+                if score == 0:
+                    risk_eval_payload = {
+                        "ts_unix_ms": now_ms,
+                        "symbol": symbol,
+                        "funding": f,
+                        "price": price,
+                    }
+                else:
+                    risk_eval_payload = {
+                        "ts_unix_ms": now_ms,
+                        "symbol": symbol,
+                        "risk": score,
+                        "direction": direction,
+                        "risk_driver": risk_driver,
+                        "funding": f,
+                        "funding_spike": funding_spike,
+                        "oi_spike": oi_spike,
+                        "liq": liq,
+                        "price": price,
+                    }
+
+                log_event("risk_eval", risk_eval_payload)
 
                 global LAST_RISK_EVAL_TS
                 LAST_RISK_EVAL_TS = now_ms
@@ -912,6 +920,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

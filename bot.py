@@ -21,6 +21,15 @@ from logger import log_event, now_ts_ms
 
 from datetime import datetime, timedelta, timezone
 
+
+def send_to_db(event, payload):
+    """
+    Backward-compatible shim.
+    Some runtime environments may still call send_to_db(...)
+    from legacy code paths; route it through the centralized logger.
+    """
+    log_event(event, payload)
+
 LOG_FILE_PATH = "bot_events.jsonl"
 LOG_SEND_HOUR_UTC_PLUS_2 = 13
 LOG_TIMEZONE = timezone(timedelta(hours=2))
@@ -389,8 +398,6 @@ async def global_risk_loop():
                 }
                 
                 log_event("risk_eval", payload)
-                send_to_db("risk_eval", payload)
-
 
                 global LAST_RISK_EVAL_TS
                 LAST_RISK_EVAL_TS = now_ms
@@ -905,6 +912,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

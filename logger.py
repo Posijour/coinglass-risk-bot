@@ -27,7 +27,7 @@ def log_event(event_type: str, payload: dict):
     """
 
     record = {
-        "ts": int(time.time()),
+        "ts": now_ts_ms(),
         "type": event_type,
         "data": payload,   # 👈 важный момент
     }

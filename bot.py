@@ -288,7 +288,6 @@ async def global_risk_loop():
         
             # логируем ВСЕГДА
             log_event("market_regime", {
-                "ts_unix_ms": now_ms,
                 "regime": regime,
                 **state,
             })
@@ -309,11 +308,9 @@ async def global_risk_loop():
                     last_activity_transition = {
                         "from": last_activity_regime,
                         "to": activity["regime"],
-                        "ts_unix_ms": now_ms,
                     }
         
                     log_event("activity_transition", {
-                        "ts_unix_ms": now_ms,
                         "from": last_activity_regime,
                         "to": activity["regime"],
                         "alerts": activity["alerts"],
@@ -324,7 +321,6 @@ async def global_risk_loop():
 
         
             log_event("activity_regime", {
-                "ts_unix_ms": now_ms,
                 "regime": activity["regime"],
                 "alerts": activity["alerts"],
                 "window_h": activity["window_h"],
@@ -386,7 +382,6 @@ async def global_risk_loop():
 
                 if score == 0:
                     risk_eval_payload = {
-                        "ts_unix_ms": now_ms,
                         "symbol": symbol,
                         "risk": score,
                         "funding": f,
@@ -394,7 +389,6 @@ async def global_risk_loop():
                     }
                 else:
                     risk_eval_payload = {
-                        "ts_unix_ms": now_ms,
                         "symbol": symbol,
                         "risk": score,
                         "direction": direction,
@@ -453,7 +447,6 @@ async def global_risk_loop():
                     )
                 
                     alert_meta = {
-                        "ts_unix_ms": now_ms,
                         "symbol": symbol,
                         "risk": score,
                         "direction": direction,
@@ -488,7 +481,6 @@ async def global_risk_loop():
                         text += f"\nConfidence: {conf_level}\nReason: {reasons[0]}"
                 
                     alert_meta = {
-                        "ts_unix_ms": now_ms,
                         "symbol": symbol,
                         "risk": score,
                         "direction": direction,
@@ -921,6 +913,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

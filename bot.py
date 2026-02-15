@@ -699,18 +699,16 @@ async def regime_cmd(message: types.Message):
     text = (
         f"🌍 Market Regime: {regime}\n\n"
         f"Market metrics (last {ALERT_WINDOW_HOURS}h):\n"
-        f"• Average risk: {state['avg_risk']}\n"
         f"• Risk buildups: {state['risk_buildups']}\n"
         f"• Risk alerts: {state['risk_alerts']}\n"
-        f"• Long bias: {state['long_bias']}\n"
-        f"• Short bias: {state['short_bias']}\n"
         f"• Symbols tracked: {state['symbols']}\n\n"
-        
             )
 
     text += (
-        f"Activity (last {activity['window_h']}h):\n"
-        f"• Alerts: {activity['alerts']}\n"
+        f"Snapshot:\n"
+        f"• Average risk: {state['avg_risk']}\n"
+        f"• Long bias: {state['long_bias']}\n"
+        f"• Short bias: {state['short_bias']}\n"
         f"• Activity regime: {activity['regime']}\n"
     )
     
@@ -925,6 +923,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

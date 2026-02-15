@@ -308,13 +308,8 @@ async def global_risk_loop():
         now_ms = now_ts_ms()
     
         if now_ms - last_regime_ts >= MARKET_REGIME_INTERVAL * 1000:
-            global (
-                stress_confirm_counter,
-                stress_exit_counter,
-                crowd_confirm_counter,
-                current_market_regime
-            )
-        
+            global stress_confirm_counter, stress_exit_counter, crowd_confirm_counter, current_market_regime
+
             state = build_market_state()
             candidate = detect_market_regime(state)
 
@@ -1026,6 +1021,7 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+
 
 
 

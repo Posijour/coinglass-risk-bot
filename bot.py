@@ -956,9 +956,9 @@ async def on_startup(dp):
     asyncio.create_task(global_risk_loop())
     asyncio.create_task(risk_loop_watchdog())
     asyncio.create_task(message_worker())
-    asyncio.create_task(daily_log_scheduler())
     asyncio.create_task(oi_loop())
     
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
+

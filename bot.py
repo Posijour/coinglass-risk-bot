@@ -1,5 +1,4 @@
 import asyncio
-import os
 import time
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -19,9 +18,6 @@ from config import *
 from collections import defaultdict, deque
 from logger import log_event, now_ts_ms
 
-from datetime import datetime, timedelta, timezone
-
-
 def send_to_db(event, payload):
     """
     Backward-compatible shim.
@@ -29,10 +25,6 @@ def send_to_db(event, payload):
     from legacy code paths; route it through the centralized logger.
     """
     log_event(event, payload)
-
-LOG_FILE_PATH = "bot_events.jsonl"
-LOG_SEND_HOUR_UTC_PLUS_2 = 13
-LOG_TIMEZONE = timezone(timedelta(hours=2))
 
 oi_poller = BinanceOIPoller(SYMBOLS, period="5m", window=12)
 
@@ -928,61 +920,6 @@ async def message_worker():
         await asyncio.sleep(SEND_DELAY_SECONDS)
         message_queue.task_done()
 
-
-async def send_and_rotate_logs():
-    if not os.path.isfile(LOG_FILE_PATH):
-        return
-
-    if os.path.getsize(LOG_FILE_PATH) == 0:
-        return  # нечего отправлять
-
-    for chat in active_chats.copy():
-        try:
-            await bot.send_document(
-                chat_id=chat,
-                document=open(LOG_FILE_PATH, "rb"),
-                caption="📎 Daily risk logs (last 24h)"
-            )
-        except Exception as e:
-            print("LOG SEND ERROR:", e)
-            
-    log_event("daily_log_sent", {
-        "ts_unix_ms": now_ts_ms(),
-        "size_bytes": os.path.getsize(LOG_FILE_PATH),
-    })
-
-    # ---- ROTATE (clear file) ----
-    try:
-        with open(LOG_FILE_PATH, "w", encoding="utf-8") as f:
-            pass  # truncate
-        print("Log file rotated")
-    except Exception as e:
-        print("LOG ROTATE ERROR:", e)
-
-
-async def daily_log_scheduler():
-    while True:
-        now = datetime.now(LOG_TIMEZONE)
-
-        target = now.replace(
-            hour=LOG_SEND_HOUR_UTC_PLUS_2,
-            minute=0,
-            second=0,
-            microsecond=0,
-        )
-
-        if now >= target:
-            target += timedelta(days=1)
-
-        sleep_seconds = (target - now).total_seconds()
-        await asyncio.sleep(sleep_seconds)
-
-        await send_and_rotate_logs()
-
-        # защита от двойного запуска
-        await asyncio.sleep(60)
-
-
 # ---------------- HEALTH ----------------
 class PingHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -1025,7 +962,3 @@ async def on_startup(dp):
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     executor.start_polling(dp, skip_updates=True, on_startup=on_startup)
-
-
-
-

@@ -1,9 +1,3 @@
-import os
-
-BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN is not set")
-
 SYMBOLS = [
     "BTCUSDT",
     "ETHUSDT",
@@ -51,7 +45,3 @@ LIQ_THRESHOLDS = {
     "ZECUSDT": 2_000_000,
     "HYPEUSDT": 1_500_000,
 }
-
-
-
-

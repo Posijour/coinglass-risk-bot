@@ -17,18 +17,11 @@ last_force_order_ts = {}
 
 trades_window = {s: deque() for s in SYMBOLS}
 liq_window = {s: deque() for s in SYMBOLS}
-oi_window = {s: deque() for s in SYMBOLS}
 trade_totals = {s: {"long": 0.0, "short": 0.0} for s in SYMBOLS}
 liq_totals = {s: {"long": 0.0, "short": 0.0} for s in SYMBOLS}
 
 def touch(symbol):
     last_update[symbol] = int(time.time())
-
-
-def cleanup_window(dq):
-    now = time.time()
-    while dq and now - dq[0][0] > WINDOW_SECONDS:
-        dq.popleft()
 
 
 def cleanup_trades(symbol):
@@ -41,14 +34,6 @@ def cleanup_trades(symbol):
         removed += 1
     return removed
 
-
-def _append_open_interest(symbol, oi_value, ts=None):
-    if symbol not in SYMBOLS:
-        return
-    now = ts or time.time()
-    oi_window[symbol].append((now, float(oi_value)))
-    cleanup_window(oi_window[symbol])
-    touch(symbol)
 
 def cleanup_liq(symbol):
     now = time.time()
@@ -144,4 +129,5 @@ async def binance_ws():
             jitter = random.uniform(0.3, 1.3)
             await asyncio.sleep(backoff * jitter)
             backoff = min(backoff * 2, max_backoff)
+
 

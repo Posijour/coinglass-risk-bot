@@ -156,16 +156,6 @@ async def start_ws_safe():
 
 
 
-def map_regime_for_divergence(regime):
-    if regime == "CALM":
-        return "CALM"
-    if regime in ("STRESS", "CROWD_IMBALANCE"):
-        return "OVERHEATED"
-    if regime in ("LATENT_STRESS", "NEUTRAL"):
-        return "BUILDUP"
-    return "BUILDUP"
-
-
 def detect_price_trend(prices):
     if len(prices) < 2:
         return "FLAT"
@@ -425,11 +415,10 @@ async def global_risk_loop():
                         },
                     )
 
-                divergence_state = map_regime_for_divergence(current_market_regime)
                 price_trend = detect_price_trend(price_history[symbol])
                 divergences = divergence.detect_divergence(
                     symbol=symbol,
-                    state=divergence_state,
+                    state=current_market_regime,
                     pressure_ratio=pressure_ratio,
                     oi_window=oi_for_risk,
                     price_trend=price_trend,
@@ -445,7 +434,6 @@ async def global_risk_loop():
                             "event_id": f"{symbol}:{now_ms}:DIV:{idx}",
                             "ts_unix_ms": now_ms,
                             "market_regime": current_market_regime,
-                            "divergence_state": divergence_state,
                             "price_trend": price_trend,
                             "pressure_ratio": round(pressure_ratio, 4),
                             "risk": score,

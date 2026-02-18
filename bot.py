@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from oi_binance import BinanceOIPoller
 
+import divergence
 import meta
 import risk
 import ws_binance as ws
@@ -40,9 +41,11 @@ crowd_confirm_counter = 0
 last_funding = {}
 prev_funding = {}
 last_oi_snapshot = {}
+price_history = {s: deque(maxlen=3) for s in SYMBOLS}
 
 ws_task = None
 ws_running = False
+
 
 
 def record_alert_if_first(alert_meta):
@@ -151,6 +154,35 @@ async def start_ws_safe():
         ws_running = False
 
 
+
+
+def map_regime_for_divergence(regime):
+    if regime == "CALM":
+        return "CALM"
+    if regime in ("STRESS", "CROWD_IMBALANCE"):
+        return "OVERHEATED"
+    if regime in ("LATENT_STRESS", "NEUTRAL"):
+        return "BUILDUP"
+    return "BUILDUP"
+
+
+def detect_price_trend(prices):
+    if len(prices) < 2:
+        return "FLAT"
+
+    start = prices[0]
+    end = prices[-1]
+    if start <= 0:
+        return "FLAT"
+
+    delta = (end - start) / start
+    if delta > 0.0005:
+        return "UP"
+    if delta < -0.0005:
+        return "DOWN"
+    return "FLAT"
+
+
 async def ws_watchdog():
     global ws_task
     while True:
@@ -237,7 +269,6 @@ async def global_risk_loop():
                 log_event(
                     "activity_transition",
                     {
-
                         "from": last_activity_regime,
                         "to": activity["regime"],
                         "alerts": activity["alerts"],
@@ -286,6 +317,9 @@ async def global_risk_loop():
 
                 price = getattr(ws, "mark_price", {}).get(symbol)
                 liq_sides = getattr(ws, "liq_sides", {}).get(symbol, {})
+
+                if price is not None:
+                    price_history[symbol].append(price)
 
                 result = risk.calculate_risk(
                     f,
@@ -391,6 +425,34 @@ async def global_risk_loop():
                         },
                     )
 
+                divergence_state = map_regime_for_divergence(current_market_regime)
+                price_trend = detect_price_trend(price_history[symbol])
+                divergences = divergence.detect_divergence(
+                    symbol=symbol,
+                    state=divergence_state,
+                    pressure_ratio=pressure_ratio,
+                    oi_window=oi_for_risk,
+                    price_trend=price_trend,
+                    liquidations=liq,
+                )
+
+                for idx, div_text in enumerate(divergences):
+                    emit_alert(
+                        f"🧭 DIVERGENCE {symbol}\n\n{div_text}",
+                        {
+                            "symbol": symbol,
+                            "type": "DIVERGENCE",
+                            "event_id": f"{symbol}:{now_ms}:DIV:{idx}",
+                            "ts_unix_ms": now_ms,
+                            "market_regime": current_market_regime,
+                            "divergence_state": divergence_state,
+                            "price_trend": price_trend,
+                            "pressure_ratio": round(pressure_ratio, 4),
+                            "risk": score,
+                            "price": price,
+                        },
+                    )
+
             except Exception as e:
                 log_event("risk_loop_error", {"symbol": symbol, "error": str(e)})
 
@@ -452,6 +514,3 @@ async def main():
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     asyncio.run(main())
-
-
-

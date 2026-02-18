@@ -173,6 +173,48 @@ def detect_price_trend(prices):
     return "FLAT"
 
 
+def detect_oi_trend(oi_window):
+    if len(oi_window) < 2:
+        return "FLAT"
+
+    start = oi_window[0][1]
+    end = oi_window[-1][1]
+
+    if end > start:
+        return "UP"
+    if end < start:
+        return "DOWN"
+    return "FLAT"
+
+
+def divergence_type_from_message(div_text):
+    if not div_text:
+        return "UNKNOWN"
+    return div_text.split("—", 1)[0].strip().replace(" ", "_")
+
+
+def divergence_confidence(pressure_ratio, liq, price_trend, oi_trend, score):
+    confidence = 0.4
+
+    if pressure_ratio >= 0.75 or pressure_ratio <= 0.3:
+        confidence += 0.2
+    elif pressure_ratio >= 0.65 or pressure_ratio <= 0.35:
+        confidence += 0.1
+
+    if liq > 0:
+        confidence += 0.1
+    if oi_trend != "FLAT":
+        confidence += 0.1
+    if price_trend != "FLAT":
+        confidence += 0.05
+    if score >= HARD_ALERT_LEVEL:
+        confidence += 0.15
+    elif score >= EARLY_ALERT_LEVEL:
+        confidence += 0.05
+
+    return round(min(confidence, 0.95), 2)
+
+
 async def ws_watchdog():
     global ws_task
     while True:
@@ -416,6 +458,7 @@ async def global_risk_loop():
                     )
 
                 price_trend = detect_price_trend(price_history[symbol])
+                oi_trend = detect_oi_trend(oi_for_risk)
                 divergences = divergence.detect_divergence(
                     symbol=symbol,
                     state=current_market_regime,
@@ -426,6 +469,30 @@ async def global_risk_loop():
                 )
 
                 for idx, div_text in enumerate(divergences):
+                    divergence_type = divergence_type_from_message(div_text)
+                    confidence = divergence_confidence(
+                        pressure_ratio=pressure_ratio,
+                        liq=liq,
+                        price_trend=price_trend,
+                        oi_trend=oi_trend,
+                        score=score,
+                    )
+
+                    risk_divergence_payload = {
+                        "symbol": symbol.replace("USDT", ""),
+                        "divergence_type": divergence_type,
+                        "state": current_market_regime,
+                        "confidence": confidence,
+                        "pressure": round(pressure_ratio, 4),
+                        "oi_trend": oi_trend,
+                        "price_trend": price_trend,
+                        "liquidations": liq,
+                        "message": div_text,
+                    }
+
+                    print(f"risk_divergence: {risk_divergence_payload}")
+                    log_event("risk_divergence", risk_divergence_payload)
+
                     emit_alert(
                         f"🧭 DIVERGENCE {symbol}\n\n{div_text}",
                         {
@@ -502,3 +569,4 @@ async def main():
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     asyncio.run(main())
+

@@ -67,9 +67,11 @@ def record_alert_if_first(alert_meta):
         alert_history[symbol].popleft()
 
 
-def emit_alert(text, alert_meta):
+def emit_alert(text, alert_meta, event_type="alert_sent"):
     record_alert_if_first(alert_meta)
-    log_event("alert_sent", {"text": text, **alert_meta})
+    payload = {"text": text, **(alert_meta or {})}
+    print(f"{event_type}: {payload}", flush=True)
+    log_event(event_type, payload)
 
 
 def detect_activity_regime_live():
@@ -478,21 +480,6 @@ async def global_risk_loop():
                         score=score,
                     )
 
-                    risk_divergence_payload = {
-                        "symbol": symbol.replace("USDT", ""),
-                        "divergence_type": divergence_type,
-                        "state": current_market_regime,
-                        "confidence": confidence,
-                        "pressure": round(pressure_ratio, 4),
-                        "oi_trend": oi_trend,
-                        "price_trend": price_trend,
-                        "liquidations": liq,
-                        "message": div_text,
-                    }
-
-                    print(f"risk_divergence: {risk_divergence_payload}")
-                    log_event("risk_divergence", risk_divergence_payload)
-
                     emit_alert(
                         f"🧭 DIVERGENCE {symbol}\n\n{div_text}",
                         {
@@ -505,7 +492,14 @@ async def global_risk_loop():
                             "pressure_ratio": round(pressure_ratio, 4),
                             "risk": score,
                             "price": price,
+                            "divergence_type": divergence_type,
+                            "confidence": confidence,
+                            "pressure": round(pressure_ratio, 4),
+                            "oi_trend": oi_trend,
+                            "liquidations": liq,
+                            "message": div_text,
                         },
+                        event_type="risk_divergence",
                     )
 
             except Exception as e:
@@ -569,4 +563,5 @@ async def main():
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     asyncio.run(main())
+
 

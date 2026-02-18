@@ -13,18 +13,12 @@ from config import *
 from logger import log_event, now_ts_ms
 
 
-def send_to_db(event, payload):
-    """Backward-compatible shim for legacy runtime paths."""
-    log_event(event, payload)
-
-
 oi_poller = BinanceOIPoller(SYMBOLS, period="5m", window=12)
 
 ACTIVITY_WINDOW_HOURS = 4
 ACTIVITY_CALM_MAX = 2
 ACTIVITY_FRAGILE_MAX = 5
 last_activity_regime = None
-last_activity_transition = None
 
 ALERT_WINDOW_HOURS = 4
 alert_history = defaultdict(deque)
@@ -45,7 +39,6 @@ crowd_confirm_counter = 0
 
 last_funding = {}
 prev_funding = {}
-last_funding_ts = {}
 last_oi_snapshot = {}
 
 ws_task = None
@@ -233,7 +226,7 @@ async def global_risk_loop():
             current_market_regime = regime
             last_regime_ts = now_ms
 
-        global last_activity_ts, last_activity_regime, last_activity_transition
+        global last_activity_ts, last_activity_regime
 
         if now_ms - last_activity_ts >= ACTIVITY_REGIME_INTERVAL * 1000:
             activity = detect_activity_regime_live()
@@ -241,14 +234,10 @@ async def global_risk_loop():
             if last_activity_regime is None:
                 last_activity_regime = activity["regime"]
             elif last_activity_regime != activity["regime"]:
-                last_activity_transition = {
-                    "from": last_activity_regime,
-                    "to": activity["regime"],
-                    "ts_unix_ms": now_ms,
-                }
                 log_event(
                     "activity_transition",
                     {
+
                         "from": last_activity_regime,
                         "to": activity["regime"],
                         "alerts": activity["alerts"],
@@ -278,7 +267,6 @@ async def global_risk_loop():
                 if f is not None:
                     prev_funding[symbol] = pf
                     last_funding[symbol] = f
-                    last_funding_ts[symbol] = now_ms
 
                 oi_vals = oi_poller.oi_window.get(symbol, [])
                 oi_for_risk = oi_vals
@@ -464,5 +452,6 @@ async def main():
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     asyncio.run(main())
+
 
 

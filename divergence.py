@@ -1,20 +1,146 @@
 import time
 
-# cooldown в секундах по типам дивергенций
-DIVERGENCE_COOLDOWN = {
+# Базовый cooldown в секундах по типам дивергенций
+BASE_DIVERGENCE_COOLDOWN = {
     "LONG_TRAP": 1800,        # 30 мин
     "SHORT_SQUEEZE": 900,     # 15 мин
     "FAKE_MOVE": 1200,        # 20 мин
     "CAPITULATION": 1800,
 }
 
+# Классы тикеров для дивергенций
+SYMBOL_CLASSES = {
+    "BTCUSDT": "L1",
+    "ETHUSDT": "L1",
+    "SOLUSDT": "L2",
+    "DOGEUSDT": "L2",
+    "ADAUSDT": "L2",
+    "LINKUSDT": "L2",
+    "LTCUSDT": "L2",
+    "BCHUSDT": "L2",
+    "BNBUSDT": "L3",
+    "TRXUSDT": "L3",
+    "XRPUSDT": "L3",
+    "XLMUSDT": "L3",
+    "HBARUSDT": "L4",
+    "XMRUSDT": "L4",
+    "ZECUSDT": "L4",
+    "HYPEUSDT": "L4",
+}
+
+# Параметры дивергенций по классам
+CLASS_DIVERGENCE_PARAMS = {
+    "L1": {
+        "long_trap_pressure": 0.68,
+        "short_squeeze_pressure": 0.74,
+        "fake_move_pressure": 0.74,
+        "capitulation_pressure": 0.32,
+        "price_trend_delta": 0.0007,
+        "cooldown_multiplier": 1.2,
+    },
+    "L2": {
+        "long_trap_pressure": 0.66,
+        "short_squeeze_pressure": 0.72,
+        "fake_move_pressure": 0.72,
+        "capitulation_pressure": 0.34,
+        "price_trend_delta": 0.0010,
+        "cooldown_multiplier": 1.0,
+    },
+    "L3": {
+        "long_trap_pressure": 0.65,
+        "short_squeeze_pressure": 0.71,
+        "fake_move_pressure": 0.71,
+        "capitulation_pressure": 0.35,
+        "price_trend_delta": 0.0012,
+        "cooldown_multiplier": 0.95,
+    },
+    "L4": {
+        "long_trap_pressure": 0.64,
+        "short_squeeze_pressure": 0.70,
+        "fake_move_pressure": 0.70,
+        "capitulation_pressure": 0.36,
+        "price_trend_delta": 0.0015,
+        "cooldown_multiplier": 0.9,
+    },
+}
+
+SYMBOL_PARAM_OVERRIDES = {
+    "ETHUSDT": {
+        "long_trap_pressure": 0.67,
+        "short_squeeze_pressure": 0.73,
+        "fake_move_pressure": 0.73,
+        "capitulation_pressure": 0.33,
+        "cooldown_multiplier": 1.15,
+    },
+    "DOGEUSDT": {
+        "price_trend_delta": 0.0010,
+    },
+    "ADAUSDT": {
+        "price_trend_delta": 0.0010,
+    },
+    "LINKUSDT": {
+        "price_trend_delta": 0.0010,
+    },
+    "LTCUSDT": {
+        "price_trend_delta": 0.0010,
+    },
+    "BCHUSDT": {
+        "price_trend_delta": 0.0010,
+    },
+    "SOLUSDT": {
+        "price_trend_delta": 0.0009,
+    },
+    "BNBUSDT": {
+        "price_trend_delta": 0.0011,
+        "cooldown_multiplier": 0.95,
+    },
+    "TRXUSDT": {
+        "price_trend_delta": 0.0011,
+        "cooldown_multiplier": 0.95,
+    },
+    "XRPUSDT": {
+        "price_trend_delta": 0.0012,
+        "cooldown_multiplier": 0.95,
+    },
+    "XLMUSDT": {
+        "price_trend_delta": 0.0012,
+        "cooldown_multiplier": 0.95,
+    },
+    "HBARUSDT": {
+        "price_trend_delta": 0.0014,
+    },
+    "XMRUSDT": {
+        "price_trend_delta": 0.0014,
+    },
+    "ZECUSDT": {
+        "price_trend_delta": 0.0015,
+    },
+    "HYPEUSDT": {
+        "price_trend_delta": 0.0016,
+        "cooldown_multiplier": 0.85,
+    },
+}
+
 _last_seen = {}  # (symbol, type) -> ts
+
+
+def get_divergence_params(symbol):
+    symbol_class = SYMBOL_CLASSES.get(symbol, "L3")
+    params = dict(CLASS_DIVERGENCE_PARAMS[symbol_class])
+    params.update(SYMBOL_PARAM_OVERRIDES.get(symbol, {}))
+    return params
+
+
+def get_price_trend_delta(symbol):
+    return get_divergence_params(symbol)["price_trend_delta"]
 
 
 def _cooldown_ok(symbol, div_type):
     now = time.time()
     key = (symbol, div_type)
-    ttl = DIVERGENCE_COOLDOWN.get(div_type, 900)
+    params = get_divergence_params(symbol)
+    base_ttl = BASE_DIVERGENCE_COOLDOWN.get(div_type, 900)
+    ttl = int(base_ttl * params["cooldown_multiplier"])
 
     last = _last_seen.get(key)
     if last and now - last < ttl:
@@ -50,7 +176,8 @@ def detect_divergence(
             oi_trend = "DOWN"
 
     pressure = pressure_ratio
-
+    params = get_divergence_params(symbol)
+    
     # ---------------- STATE-AWARE RULES ----------------
 
     # ❌ В CALM — ничего не показываем
@@ -60,7 +187,7 @@ def detect_divergence(
     # 🔻 LONG TRAP
     if (
         state in ("LATENT_STRESS", "NEUTRAL", "CROWD_IMBALANCE", "STRESS")
-        and pressure > 0.65
+        and pressure > params["long_trap_pressure"]
         and oi_trend == "UP"
         and price_trend in ("FLAT", "DOWN")
     ):
@@ -73,7 +200,7 @@ def detect_divergence(
     # 🔺 SHORT SQUEEZE
     if (
         state in ("CROWD_IMBALANCE", "STRESS")
-        and pressure > 0.7
+        and pressure > params["short_squeeze_pressure"]
         and oi_trend == "UP"
         and liquidations > 0
     ):
@@ -86,7 +213,7 @@ def detect_divergence(
     # 🔻 FAKE MOVE
     if (
         state in ("LATENT_STRESS", "NEUTRAL", "CROWD_IMBALANCE", "STRESS")
-        and pressure > 0.7
+        and pressure > params["fake_move_pressure"]
         and oi_trend == "DOWN"
         and price_trend in ("UP", "FLAT")
     ):
@@ -99,7 +226,7 @@ def detect_divergence(
     # 🧨 CAPITULATION
     if (
         state == "STRESS"
-        and pressure < 0.35
+        and pressure < params["capitulation_pressure"]
         and oi_trend == "DOWN"
         and liquidations > 0
     ):

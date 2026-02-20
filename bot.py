@@ -158,7 +158,7 @@ async def start_ws_safe():
 
 
 
-def detect_price_trend(prices):
+def detect_price_trend(symbol, prices):
     if len(prices) < 2:
         return "FLAT"
 
@@ -168,9 +168,10 @@ def detect_price_trend(prices):
         return "FLAT"
 
     delta = (end - start) / start
-    if delta > 0.0005:
+    trend_delta = divergence.get_price_trend_delta(symbol)
+    if delta > trend_delta:
         return "UP"
-    if delta < -0.0005:
+    if delta < -trend_delta:
         return "DOWN"
     return "FLAT"
 
@@ -459,7 +460,7 @@ async def global_risk_loop():
                         },
                     )
 
-                price_trend = detect_price_trend(price_history[symbol])
+                price_trend = detect_price_trend(symbol, price_history[symbol])
                 oi_trend = detect_oi_trend(oi_for_risk)
                 divergences = divergence.detect_divergence(
                     symbol=symbol,
@@ -563,5 +564,6 @@ async def main():
 if __name__ == "__main__":
     threading.Thread(target=start_http, daemon=True).start()
     asyncio.run(main())
+
 
 
